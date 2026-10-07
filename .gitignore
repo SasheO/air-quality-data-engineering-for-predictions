@@ -1,0 +1,6 @@
+test_*.py
+*.env
+*.json
+notes.txt
+todo.txt
+/logs

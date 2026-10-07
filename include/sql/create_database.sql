@@ -1,0 +1,1 @@
+create database if not exists air_quality_datasets;
