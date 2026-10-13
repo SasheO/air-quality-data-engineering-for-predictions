@@ -4,3 +4,4 @@ test_*.py
 notes.txt
 todo.txt
 /logs
+*.txt
