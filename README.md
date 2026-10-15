@@ -7,6 +7,8 @@ TODO: fill in
 
 Run docker compose up:
 
-Set Clickhouse connection in airflow:
+Set Clickhouse and minio connection in airflow:
+
+Set up OPENWEATHER_API_SECRET_KEY variable
 
 TODO: fill in

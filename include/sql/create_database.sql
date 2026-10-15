@@ -1,1 +1,1 @@
-create database if not exists air_quality_datasets;
+create database if not exists {{ params.schema_name }};
