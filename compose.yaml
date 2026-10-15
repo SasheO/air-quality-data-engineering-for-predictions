@@ -310,7 +310,7 @@ services:
       - data-minio:/data
     environment:
       MINIO_ROOT_USER: ${MINIO_USER}
-      MINIO_ROOT_PASSWORD: ${MINO_PASSWORD}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD}
 
 volumes:
   postgres-db-volume:
