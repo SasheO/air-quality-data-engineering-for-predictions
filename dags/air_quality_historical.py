@@ -38,12 +38,21 @@ default_args = {
     'email_on_retry': False,
     'execution_timeout': timedelta(minutes=30),
     'trigger_rule': 'all_success',
+    'do_xcom_push': False, 
     "params":{
         "schema_name": SCHEMA_NAME,
         "raw_table_name": RAW_TABLE_NAME,
         "city_coordinates_table_name": CITY_COORDINATES_TABLE,
         }
 }
+
+def read_sql_script(relative_include_path:str) -> str:
+    '''
+    pass in the path here the same way you 
+    '''
+    with open(f"{INCLUDE_PATH}/{relative_include_path}", "r") as f:
+        sql = f.read()
+    return sql
 
 @dag(
     dag_id="air_quality_historical",
@@ -62,26 +71,18 @@ def air_quality_historical():
         sql = f"sql/create_database.sql",
         conn_id=CLICKHOUSE_CONN,
     )
-
-    # refresh_city_coordinates_table = SQLExecuteQueryOperator(
-    #     task_id='refresh_city_coordinates_table',
-    #     sql = f"sql/load_city_coordinates.sql",
-    #     split_statements=True,
-    #     conn_id=CLICKHOUSE_CONN,
-    # )
-
     create_tables = SQLExecuteQueryOperator(
-        task_id='create_tables',
+        task_id='create_tables_if_not_exists',
         sql = f"sql/create_raw_data_table.sql",
         split_statements=True,
         conn_id=CLICKHOUSE_CONN,
-    )
+    )   
 
     @task
-    def load_city_coordinates():
+    def refresh_city_coordinates_table():
         import csv
 
-        hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
+        ch_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
 
         data = []
 
@@ -103,14 +104,40 @@ def air_quality_historical():
                     row[indx] = float(row[indx])
                 data.append(row)
         
-        hook.bulk_insert_rows(
+        ch_hook.bulk_insert_rows(
             table=f"{SCHEMA_NAME}.{CITY_COORDINATES_TABLE}", 
             rows=data, 
             column_names=column_headers
         )
 
-    load_city_coordinates_ =  load_city_coordinates()
+    @task
+    def get_city_coordinates(**context):
+        '''
+        return a list of dicts mapping column name to value for each row in city coordinates table
+        '''
+        ch_client = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN).get_client()
 
-    create_schema_if_not_exists >> create_tables >> load_city_coordinates_
+        script = read_sql_script("sql/get_deduplicated_city_coordinates.sql")
+
+        ti = context['ti']
+        rendered = ti.task.render_template(script, context)
+
+        query_result = ch_client.query(rendered)
+
+        columns = query_result.column_names
+        rows = query_result.result_rows
+
+        outputs = []
+
+        for row in rows:
+            outputs.append(dict(zip(columns, row)))
+
+        return outputs
+    
+    refresh_city_coordinates_table_ =  refresh_city_coordinates_table()
+    city_coordinates = get_city_coordinates()
+
+    create_schema_if_not_exists >> create_tables >> refresh_city_coordinates_table_ >> \
+    city_coordinates
 
 air_quality_historical_dag = air_quality_historical()
