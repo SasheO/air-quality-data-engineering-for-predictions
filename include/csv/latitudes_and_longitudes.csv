@@ -1,4 +1,4 @@
-city,country,latitude,longitude
+city,country,latitude_coordinate,longitude_coordinate
 Lagos,NG,6.4550575,3.3941795
 Abuja,NG,9.0643305,7.4892974
 Cairo,EG,30.0443879,31.2357257
