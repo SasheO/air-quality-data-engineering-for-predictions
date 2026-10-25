@@ -8,6 +8,7 @@ import requests
 from decimal import Decimal
 from typing import Any
 import os
+from dotenv import load_dotenv
 from datetime import (
     datetime, 
     timedelta,
@@ -32,20 +33,21 @@ from cosmos.constants import TestBehavior
 from cosmos.operators import DbtDocsS3Operator
 
 logger = logging.getLogger(__name__)
+load_dotenv()
 
 CLICKHOUSE_CONN = "clickhouse_conn"
 MINIO_CONN = "minio_conn"
 INCLUDE_PATH = '/opt/airflow/include'
-AIR_QUAILTY_DBT_PROJECT_PATH="/opt/airflow/air_quality_dbt"
+AIR_QUAILTY_DBT_PROJECT_PATH=f"{INCLUDE_PATH}/dbt/air_quality_feature_engineering"
 
 SOURCE_SCHEMA_NAME = 'weather_raw'
 RAW_TABLE_NAME = 'air_pollution'
 CITY_COORDINATES_TABLE_NAME = 'city_coordinates'
 
-MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME")
+MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "air-quality")
 MINIO_CONN_ID="minio_conn"
 
-OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY") # TODO: get this from airflow variables
+OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY") 
 
 RAW_TABLE_COLUMNS = [
     "longitude_coordinate",
@@ -87,7 +89,7 @@ render_config=RenderConfig(
     )
 
 with open(f"{INCLUDE_PATH}/doc_md/air_quality_historical.md", "r", encoding="utf-8") as file:
-    DOC_MD = file.read() # TODO: complete the MD file
+    DOC_MD = file.read() 
 
 default_args = {
     "depends_on_past": True, 
@@ -97,7 +99,6 @@ default_args = {
     'email_on_retry': False,
     'execution_timeout': timedelta(minutes=30),
     'trigger_rule': 'all_success',
-    # 'do_xcom_push': False, 
     "params":{
         "schema_name": SOURCE_SCHEMA_NAME,
         "raw_table_name": RAW_TABLE_NAME,
@@ -107,7 +108,7 @@ default_args = {
 
 def read_sql_script(relative_include_path:str) -> str:
     '''
-    pass in the path here the same way you 
+    pass in the path here the same way you would pass it in to an Airflow operator
     '''
     with open(f"{INCLUDE_PATH}/{relative_include_path}", "r") as f:
         sql = f.read()
@@ -118,8 +119,6 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
     modifies output_rows in place to contain insert ready rows with data from city_dict and json payload
     based on fields in RAW_TABLE_COLUMNS
     '''
-    city = city_dict["city"]
-    country = city_dict["country"]
     lat = float(city_dict["latitude_coordinate"])
     lon = float(city_dict["longitude_coordinate"])
 
@@ -130,9 +129,9 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
         if comp:
             row_count += 1
             output_rows.append((
-                lon,                                       # longitude Decimal(10,7)
-                lat,                                       # latitude  Decimal(10,7)
-                comp.get("co"),                            # Decimal(8,3)
+                lon,
+                lat,
+                comp.get("co"),
                 comp.get("no"),
                 comp.get("no2"),
                 comp.get("o3"),
@@ -140,8 +139,8 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
                 comp.get("pm2_5"),
                 comp.get("pm10"),
                 comp.get("nh3"),
-                (entry.get("main") or {}).get("aqi"),      # UInt8
-                entry["dt"],                               # unix seconds → DateTime
+                (entry.get("main") or {}).get("aqi"),
+                entry["dt"],
                 dag_run_id,
             ))
     logger.info(f"{row_count} queued for insertion")
@@ -179,7 +178,6 @@ def air_quality_historical():
         with open(f"{INCLUDE_PATH}/csv/latitudes_and_longitudes.csv", mode="r", newline="", encoding="utf-8") as file:
             reader = csv.reader(file)
             
-            # Optional: Skip or capture the header row
             column_headers = next(reader) 
             number_column_headers = []
 
@@ -188,8 +186,7 @@ def air_quality_historical():
                 if "_coordinate" in column_header:
                     number_column_headers.append(indx)
 
-            for row in reader:
-                # Each 'row' is a list of strings
+            for row in reader: # Each 'row' is a list of strings
                 try:
                     city_dict = {}
                     for indx in range(len(column_headers)):
@@ -201,6 +198,7 @@ def air_quality_historical():
                     city_coordinates_list.append(city_dict)
                 except Exception as e:
                     logger.warning(f"Error encountered parsing city row in CSV: {e}")
+                    
         return city_coordinates_list
 
     @task_group
@@ -218,16 +216,16 @@ def air_quality_historical():
         )   
 
         @task
-        def write_city_data(coords: list[dict[str, Any]]):
-            if not coords:
-                logger.info(f"Empty city_coordinates: {coords}; exiting...")
+        def write_city_data(_city_coordinates: list[dict[str, Any]]):
+            if not _city_coordinates:
+                logger.info(f"Empty city_coordinates: {_city_coordinates}; exiting...")
                 return
-            logger.info(f"city_coordinates: {coords}; exiting...")
+            logger.info(f"city_coordinates: {_city_coordinates}; exiting...")
             
             city_coordinates_insert_data = []
-            column_names = list(coords[0].keys())
+            column_names = list(_city_coordinates[0].keys())
 
-            for row in coords:
+            for row in _city_coordinates:
                 city_coordinates_insert_data.append([row.get(x) for x in column_names])
                     
             ch_hook.bulk_insert_rows(
@@ -237,7 +235,7 @@ def air_quality_historical():
             )
 
         @task
-        def write_air_pollution_data(coords: list[dict[str, Any]]):
+        def write_air_pollution_data(_city_coordinates: list[dict[str, Any]]):
             # TODO: make writes idempotent
             context = get_current_context()
             dag_run_id = context["dag_run"].run_id
@@ -251,7 +249,7 @@ def air_quality_historical():
             start_time_unix = int(first_day_prev_month.timestamp())
             end_time_unix = int(first_day_this_month.timestamp())
 
-            for city_dict in coords:
+            for city_dict in _city_coordinates:
                 logger.info(f"Fetching historical data from {first_day_prev_month} to {first_day_this_month} for {city_dict.get('city')}, {city_dict.get('country')}")
                 lat = city_dict.get("latitude_coordinate")
                 lon = city_dict.get("longitude_coordinate")
@@ -284,17 +282,33 @@ def air_quality_historical():
         write_air_pollution_data_task = write_air_pollution_data(city_coordinates)
 
         truncate_city_coordinates >> write_city_data_task >> write_air_pollution_data_task
-
     
     @task()
     def create_bucket_if_not_exists():
         hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
+        
         # Check if the bucket already exists
         if not hook.check_for_bucket(MINIO_BUCKET_NAME):
             hook.create_bucket(bucket_name=MINIO_BUCKET_NAME)
             logger.info(f"Bucket {MINIO_BUCKET_NAME} created successfully.")
         else:
             logger.info(f"Bucket {MINIO_BUCKET_NAME} already exists. Skipping creation.")
+    
+    dbt_models = DbtTaskGroup(
+        group_id = "dbt_models",
+        project_config = project_config,
+        profile_config = profile_config,
+        render_config = render_config,
+    )
+
+    generate_dbt_docs_to_minio_bucket = DbtDocsS3Operator(
+        task_id="generate_dbt_docs_to_minio_bucket",
+        project_dir=AIR_QUAILTY_DBT_PROJECT_PATH,
+        profile_config=profile_config,
+        connection_id=MINIO_CONN_ID,
+        bucket_name=MINIO_BUCKET_NAME,
+        folder_dir="/dbt_docs"
+    )
 
     city_coordinates = get_city_coordinates()
     wcarapt = write_city_and_raw_air_pollution_data(city_coordinates)
@@ -304,6 +318,10 @@ def air_quality_historical():
     
     create_tables >> city_coordinates
 
-    city_coordinates >> wcarapt
+    city_coordinates >> wcarapt >> dbt_models
+
+    cbine >> dbt_models >> generate_dbt_docs_to_minio_bucket 
+    
+    # TODO: after dbt_models does feature extraction, the model should be loaded from minio and used to predict features in the serving layer
 
 air_quality_historical_dag = air_quality_historical()

@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: weather_raw
+    database: weather_raw
+    tables:
+      - name: city_coordinates
+        description: City coordinates with City Names and Country names
+      - name: air_pollution
+        description: Air pollution data from OpenWeatherMap API air pollution endpoint. 
