@@ -255,13 +255,12 @@ def air_quality_historical():
 
             build_rows(city_dict, payload, dag_run_id, insert_rows_with_city_data)
             
-        # TODO: actually insert
         if not insert_rows_with_city_data:
             logger.warning("No rows fetched — skipping insert")
         else:
             ch_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
             ch_hook.bulk_insert_rows(
-            table=f"{SCHEMA_NAME}.{RAW_TABLE_COLUMNS}", 
+            table=f"{SCHEMA_NAME}.{RAW_TABLE_NAME}", 
             rows=insert_rows_with_city_data, 
             column_names=RAW_TABLE_COLUMNS
         )
