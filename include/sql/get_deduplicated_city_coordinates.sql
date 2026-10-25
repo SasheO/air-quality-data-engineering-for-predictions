@@ -4,13 +4,11 @@ with deduplicated as (
         country,
         latitude_coordinate,
         longitude_coordinate,
+        city_coordinates_id,
         row_number() over (partition by (city, country) ORDER by created_at desc) as rn
     FROM {{params.schema_name}}.{{params.city_coordinates_table_name}}
 )
 select 
-    city,
-    country,
-    latitude_coordinate,
-    longitude_coordinate
+    * EXCEPT (rn)
 from deduplicated
 where rn = 1
