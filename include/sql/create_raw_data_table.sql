@@ -1,5 +1,4 @@
 create table if not exists {{ params.schema_name }}.{{ params.raw_table_name }} (
-    -- TODO: can any of these concentration fields or aqi come in null from the api?
     longitude_coordinate Decimal(10, 7), 
     latitude_coordinate Decimal(10, 7),
     city_coordinates_id UInt64,

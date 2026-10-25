@@ -30,7 +30,6 @@ RAW_TABLE_NAME = 'air_pollution'
 CITY_COORDINATES_TABLE_NAME = 'city_coordinates'
 
 RAW_TABLE_COLUMNS = [
-    "city_coordinates_id",
     "longitude_coordinate",
     "latitude_coordinate",
     "co_concentration",
@@ -83,19 +82,16 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
     '''
     city = city_dict["city"]
     country = city_dict["country"]
-    city_coordinates_id = city_dict["id"]
     lat = float(city_dict["latitude_coordinate"])
     lon = float(city_dict["longitude_coordinate"])
 
     row_count = 0
 
     for entry in payload.get("list", []):
-        # -- TODO: can any of these concentration fields or aqi come in null from the api?
         comp = entry.get("components", {}) or {}
         if comp:
             row_count += 1
             output_rows.append((
-                city_coordinates_id,
                 lon,                                       # longitude Decimal(10,7)
                 lat,                                       # latitude  Decimal(10,7)
                 comp.get("co"),                            # Decimal(8,3)
@@ -114,7 +110,7 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
 
 @dag(
     dag_id="air_quality_historical",
-    start_date=datetime(2021, 2, 1),
+    start_date=datetime(2023, 1, 1),
     schedule="0 6 1 * *", # get data for previous month on first of the next month at 6 AM
     template_searchpath=[INCLUDE_PATH],
     default_args=default_args,
@@ -170,31 +166,31 @@ def air_quality_historical():
         return city_coordinates_list
 
     @task_group
-    def write_city_and_raw_air_pollution_data(city_coordinates: list[dict[str, Any]]):
-        '''
+    def write_city_and_raw_air_pollution_data(city_coordinates):
+        """
         arguments:
-            city_coordinates: a list of dicts with city,country,latitude_coordinate,longitude_coordinate
-        '''
+            city_coordinates: An XComArg resolving to a list of dicts with city,country,latitude_coordinate,longitude_coordinate
+        """
         ch_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
         
-
         truncate_city_coordinates = SQLExecuteQueryOperator(
             task_id='truncate_city_table',
             sql = f"TRUNCATE TABLE {SOURCE_SCHEMA_NAME}.{CITY_COORDINATES_TABLE_NAME}",
             conn_id=CLICKHOUSE_CONN,
         )   
 
+        # 1. Accept coords directly as a runtime argument
         @task
-        def write_city_data():
-            if not city_coordinates:
-                logger.info(f"Empty city_coordinates: {city_coordinates}; exiting...")
+        def write_city_data(coords: list[dict[str, Any]]):
+            if not coords:
+                logger.info(f"Empty city_coordinates: {coords}; exiting...")
                 return
+            logger.info(f"city_coordinates: {coords}; exiting...")
             
             city_coordinates_insert_data = []
-            column_names = list(city_coordinates[0].keys())
+            column_names = list(coords[0].keys())
 
-            for row in city_coordinates:
-                # Each 'row' is a list of strings
+            for row in coords:
                 city_coordinates_insert_data.append([row.get(x) for x in column_names])
                     
             ch_hook.bulk_insert_rows(
@@ -203,28 +199,26 @@ def air_quality_historical():
                 column_names=column_names
             )
 
+        # 2. Accept coords directly as a runtime argument
         @task
-        def write_air_pollution_data():
+        def write_air_pollution_data(coords: list[dict[str, Any]]):
+            # TODO: make writes idempotent
             context = get_current_context()
             dag_run_id = context["dag_run"].run_id
-            
+
             insert_rows_with_city_data = []
             
             today = datetime.now(timezone.utc)
             first_day_this_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            end_time = first_day_this_month - timedelta(seconds=1)
             first_day_prev_month = (first_day_this_month - timedelta(days=1)).replace(day=1)
-            start_time = first_day_prev_month
 
-            start_time_unix = int(start_time.timestamp())
-            end_time_unix = int(end_time.timestamp())
+            start_time_unix = int(first_day_prev_month.timestamp())
+            end_time_unix = int(first_day_this_month.timestamp())
 
-            # TODO: re-create city table each time. DBT handles CDC with SCD 2
-
-            for city_dict in city_coordinates:
-                logger.info(f"Fetching historical data from {start_time} to {end_time} for {city_dict.get("city")}, {city_dict.get("country")}")
+            for city_dict in coords:
+                logger.info(f"Fetching historical data from {first_day_prev_month} to {first_day_this_month} for {city_dict.get('city')}, {city_dict.get('country')}")
                 lat = city_dict.get("latitude_coordinate")
-                lon = city_dict.get("longitude_coordinate") # TODO
+                lon = city_dict.get("longitude_coordinate")
                 resp = requests.get(
                         "http://api.openweathermap.org/data/2.5/air_pollution/history",
                         params={
@@ -239,19 +233,24 @@ def air_quality_historical():
                 resp.raise_for_status()
                 payload = resp.json()
 
-
                 build_rows(city_dict, payload, dag_run_id, insert_rows_with_city_data)
                 
             if not insert_rows_with_city_data:
                 logger.warning("No rows fetched — skipping insert")
             else:
                 ch_hook.bulk_insert_rows(
-                table=f"{SOURCE_SCHEMA_NAME}.{RAW_TABLE_NAME}", 
-                rows=insert_rows_with_city_data, 
-                column_names=RAW_TABLE_COLUMNS
-            )
+                    table=f"{SOURCE_SCHEMA_NAME}.{RAW_TABLE_NAME}", 
+                    rows=insert_rows_with_city_data, 
+                    column_names=RAW_TABLE_COLUMNS
+                )
 
-        truncate_city_coordinates >> write_city_data() >> write_air_pollution_data()
+        # 3. Explicitly pass the incoming XComArg into your task invocations
+        # Airflow will resolve the Jinja/XCom reference automatically here
+        write_city_data_task = write_city_data(city_coordinates)
+        write_air_pollution_data_task = write_air_pollution_data(city_coordinates)
+
+        # 4. Enforce the execution order
+        truncate_city_coordinates >> write_city_data_task >> write_air_pollution_data_task
 
     create_schema_if_not_exists >> create_tables 
     
@@ -259,6 +258,8 @@ def air_quality_historical():
     
     create_tables >> city_coordinates
 
-    write_city_and_raw_air_pollution_data(city_coordinates)
+    wcarapt = write_city_and_raw_air_pollution_data(city_coordinates)
+
+    city_coordinates >> wcarapt
 
 air_quality_historical_dag = air_quality_historical()
