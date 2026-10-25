@@ -1,4 +1,5 @@
 create table if not exists {{ params.schema_name }}.{{ params.raw_table_name }} (
+    -- TODO: can any of these concentration fields or aqi come in null from the api?
     longitude_coordinate Decimal(10, 7), 
     latitude_coordinate Decimal(10, 7),
     city_coordinates_id UInt64,
@@ -11,12 +12,13 @@ create table if not exists {{ params.schema_name }}.{{ params.raw_table_name }} 
     pm10_concentration Decimal(6, 3), 
     nh3_concentration Decimal(6, 3), 
     aqi UInt8, 
-    `datetime` DateTime,
+    `time_of_measurement` DateTime,
     created_at DateTime DEFAULT now(),
     inserted_by Nullable(String)
 )
 ENGINE = MergeTree()
 ORDER BY (longitude_coordinate, latitude_coordinate, `datetime`);
+
 
 create table if not exists {{ params.schema_name }}.{{ params.city_coordinates_table_name }} (
     city String,

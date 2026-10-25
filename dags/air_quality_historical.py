@@ -32,8 +32,8 @@ CLICKHOUSE_CONN = "clickhouse_conn"
 MINIO_CONN = "minio_conn"
 INCLUDE_PATH = '/opt/airflow/include'
 
-SCHEMA_NAME = 'air_quality_datasets'
-RAW_TABLE_NAME = 'raw'
+SOURCE_SCHEMA_NAME = 'weather_raw'
+RAW_TABLE_NAME = 'air_pollution'
 CITY_COORDINATES_TABLE = 'city_coordinates'
 
 RAW_TABLE_COLUMNS = [
@@ -49,7 +49,7 @@ RAW_TABLE_COLUMNS = [
     "pm10_concentration",
     "nh3_concentration",
     "aqi",
-    "datetime",
+    "time_of_measurement",
     "inserted_by",
     # created_at not included
 ]
@@ -69,7 +69,7 @@ default_args = {
     'trigger_rule': 'all_success',
     # 'do_xcom_push': False, 
     "params":{
-        "schema_name": SCHEMA_NAME,
+        "schema_name": SOURCE_SCHEMA_NAME,
         "raw_table_name": RAW_TABLE_NAME,
         "city_coordinates_table_name": CITY_COORDINATES_TABLE,
         }
@@ -97,6 +97,7 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
     row_count = 0
 
     for entry in payload.get("list", []):
+        # -- TODO: can any of these concentration fields or aqi come in null from the api?
         comp = entry.get("components", {}) or {}
         if comp:
             row_count += 1
@@ -112,7 +113,7 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
                 comp.get("pm2_5"),
                 comp.get("pm10"),
                 comp.get("nh3"),
-                (entry.get("main") or {}).get("aqi", 0),      # UInt8; 0 signified invalid values because valid is 1-5
+                (entry.get("main") or {}).get("aqi"),      # UInt8
                 entry["dt"],                               # unix seconds → DateTime
                 dag_run_id,
             ))
@@ -169,7 +170,7 @@ def air_quality_historical():
                 data.append(row)
         
         ch_hook.bulk_insert_rows(
-            table=f"{SCHEMA_NAME}.{CITY_COORDINATES_TABLE}", 
+            table=f"{SOURCE_SCHEMA_NAME}.{CITY_COORDINATES_TABLE}", 
             rows=data, 
             column_names=column_headers
         )
@@ -260,7 +261,7 @@ def air_quality_historical():
         else:
             ch_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
             ch_hook.bulk_insert_rows(
-            table=f"{SCHEMA_NAME}.{RAW_TABLE_NAME}", 
+            table=f"{SOURCE_SCHEMA_NAME}.{RAW_TABLE_NAME}", 
             rows=insert_rows_with_city_data, 
             column_names=RAW_TABLE_COLUMNS
         )
