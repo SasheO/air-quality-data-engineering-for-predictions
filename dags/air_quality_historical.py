@@ -1,33 +1,51 @@
+'''
+TODO: make this pipeline run daily
+also make pipeline idempotent with the use of a process log and expand params
+'''
+
+import logging
+import requests
+from decimal import Decimal
+from typing import Any
+import os
 from datetime import (
     datetime, 
     timedelta,
     timezone,
     date,
     )
+
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
+from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
+from airflow.operators.python import get_current_context
+from airflow.models import Variable
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.decorators import (
     task_group, 
     task, 
     dag,
     )
-import logging
-import requests
-from decimal import Decimal
-from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
-from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
-from airflow.operators.python import get_current_context
-from airflow.models import Variable
-from typing import Any
 
+from cosmos.profiles import ClickhouseUserPasswordProfileMapping
+from cosmos import DbtTaskGroup, ProjectConfig, ProfileConfig, RenderConfig
+from cosmos.constants import TestBehavior
+from cosmos.operators import DbtDocsS3Operator
 
 logger = logging.getLogger(__name__)
 
 CLICKHOUSE_CONN = "clickhouse_conn"
 MINIO_CONN = "minio_conn"
 INCLUDE_PATH = '/opt/airflow/include'
+AIR_QUAILTY_DBT_PROJECT_PATH="/opt/airflow/air_quality_dbt"
 
 SOURCE_SCHEMA_NAME = 'weather_raw'
 RAW_TABLE_NAME = 'air_pollution'
 CITY_COORDINATES_TABLE_NAME = 'city_coordinates'
+
+MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME")
+MINIO_CONN_ID="minio_conn"
+
+OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY") # TODO: get this from airflow variables
 
 RAW_TABLE_COLUMNS = [
     "longitude_coordinate",
@@ -46,13 +64,33 @@ RAW_TABLE_COLUMNS = [
     # created_at not included
 ]
 
-OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY") # TODO: get this from airflow variables
+profile_config = ProfileConfig(
+    profile_name="air_quality_dbt_profile",
+    target_name="dev",
+    profile_mapping=ClickhouseUserPasswordProfileMapping( 
+         conn_id=CLICKHOUSE_CONN, 
+         profile_args={
+            "schema": "weather_features",
+            "port": 9000,
+            "driver": "native" 
+        },
+     ), 
+)
+
+project_config = ProjectConfig(
+    dbt_project_path=AIR_QUAILTY_DBT_PROJECT_PATH
+    )
+
+render_config=RenderConfig(
+        test_behavior=TestBehavior.AFTER_EACH,
+        should_detach_multiple_parents_tests=True,
+    )
 
 with open(f"{INCLUDE_PATH}/doc_md/air_quality_historical.md", "r", encoding="utf-8") as file:
     DOC_MD = file.read() # TODO: complete the MD file
 
 default_args = {
-    "depends_on_past": True, # so if a relationship data test fails for example (they are not fail-fast but run after all berka tasks), data quality issues don't compound. The DE gets a notification and can resolve the issue before future runs.
+    "depends_on_past": True, 
     "retries": 2,
     "retry_delay": timedelta(minutes=3),
     'email_on_failure': False,
@@ -179,7 +217,6 @@ def air_quality_historical():
             conn_id=CLICKHOUSE_CONN,
         )   
 
-        # 1. Accept coords directly as a runtime argument
         @task
         def write_city_data(coords: list[dict[str, Any]]):
             if not coords:
@@ -199,7 +236,6 @@ def air_quality_historical():
                 column_names=column_names
             )
 
-        # 2. Accept coords directly as a runtime argument
         @task
         def write_air_pollution_data(coords: list[dict[str, Any]]):
             # TODO: make writes idempotent
@@ -244,21 +280,29 @@ def air_quality_historical():
                     column_names=RAW_TABLE_COLUMNS
                 )
 
-        # 3. Explicitly pass the incoming XComArg into your task invocations
-        # Airflow will resolve the Jinja/XCom reference automatically here
         write_city_data_task = write_city_data(city_coordinates)
         write_air_pollution_data_task = write_air_pollution_data(city_coordinates)
 
-        # 4. Enforce the execution order
         truncate_city_coordinates >> write_city_data_task >> write_air_pollution_data_task
+
+    
+    @task()
+    def create_bucket_if_not_exists():
+        hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
+        # Check if the bucket already exists
+        if not hook.check_for_bucket(MINIO_BUCKET_NAME):
+            hook.create_bucket(bucket_name=MINIO_BUCKET_NAME)
+            logger.info(f"Bucket {MINIO_BUCKET_NAME} created successfully.")
+        else:
+            logger.info(f"Bucket {MINIO_BUCKET_NAME} already exists. Skipping creation.")
+
+    city_coordinates = get_city_coordinates()
+    wcarapt = write_city_and_raw_air_pollution_data(city_coordinates)
+    cbine = create_bucket_if_not_exists()
 
     create_schema_if_not_exists >> create_tables 
     
-    city_coordinates = get_city_coordinates()
-    
     create_tables >> city_coordinates
-
-    wcarapt = write_city_and_raw_air_pollution_data(city_coordinates)
 
     city_coordinates >> wcarapt
 
