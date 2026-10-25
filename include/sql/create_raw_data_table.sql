@@ -19,12 +19,12 @@ ENGINE = MergeTree()
 ORDER BY (longitude_coordinate, latitude_coordinate, `datetime`);
 
 create table if not exists {{ params.schema_name }}.{{ params.city_coordinates_table_name }} (
-    id UInt64 DEFAULT generateSerialID('my_database.orders_autonumber.id'),
     city String,
     country FixedString(2), 
     longitude_coordinate Decimal(10, 7), 
     latitude_coordinate Decimal(10, 7),
+    `id` UInt64 MATERIALIZED farmHash64(toString(latitude_coordinate), toString(longitude_coordinate)),
     created_at DateTime DEFAULT now()
 )
 ENGINE = ReplacingMergeTree(created_at)
-ORDER BY (country, city);
+ORDER BY (`id`, country, city);

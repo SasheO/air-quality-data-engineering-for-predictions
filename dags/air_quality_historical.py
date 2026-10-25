@@ -11,6 +11,7 @@ from datetime import (
     datetime, 
     timedelta,
     timezone,
+    date,
     )
 from airflow.decorators import (
     task_group, 
@@ -19,6 +20,7 @@ from airflow.decorators import (
     )
 import logging
 import requests
+from decimal import Decimal
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
 from airflow.operators.python import get_current_context
@@ -65,7 +67,7 @@ default_args = {
     'email_on_retry': False,
     'execution_timeout': timedelta(minutes=30),
     'trigger_rule': 'all_success',
-    'do_xcom_push': False, 
+    # 'do_xcom_push': False, 
     "params":{
         "schema_name": SCHEMA_NAME,
         "raw_table_name": RAW_TABLE_NAME,
@@ -88,7 +90,7 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
     '''
     city = city_dict["city"]
     country = city_dict["country"]
-    city_coordinates_id = city_dict["city_coordinates_id"]
+    city_coordinates_id = city_dict["id"]
     lat = payload.get("coord", {}).get("lat") or float(city_dict["latitude_coordinate"])
     lon = payload.get("coord", {}).get("lon")  or float(city_dict["longitude_coordinate"])
 
@@ -191,10 +193,21 @@ def air_quality_historical():
 
         outputs = []
 
-        for row in rows:
-            outputs.append(dict(zip(columns, row)))
+        def _json_safe(value):
+            if isinstance(value, (bytes, bytearray)):
+                return value.decode("utf-8")
+            if isinstance(value, Decimal):
+                return float(value)  # or str(value) if you want to preserve precision
+            if isinstance(value, (datetime, date)):
+                return value.isoformat()
+            return value
 
+        for row in rows:
+            outputs.append({col: _json_safe(val) for col, val in zip(columns, row)})
+
+        logger.info(f"get_city_coordinates returned {len(outputs)} rows")
         return outputs
+
     
     '''
     TODO: add task that fetches the entire month as a json,
