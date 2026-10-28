@@ -41,7 +41,7 @@ INCLUDE_PATH = '/opt/airflow/include'
 AIR_QUAILTY_DBT_PROJECT_PATH=f"{INCLUDE_PATH}/dbt/air_quality_feature_engineering"
 
 SOURCE_SCHEMA_NAME = 'weather_raw'
-RAW_TABLE_NAME = 'air_pollution'
+AIR_QUALITY_RAW_TABLE_NAME = 'air_pollution'
 CITY_COORDINATES_TABLE_NAME = 'city_coordinates'
 
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "air-quality")
@@ -64,6 +64,7 @@ RAW_TABLE_COLUMNS = [
     "time_of_measurement",
     "inserted_by",
     # created_at not included
+    "row_content_hash",
 ]
 
 profile_config = ProfileConfig(
@@ -101,8 +102,10 @@ default_args = {
     'trigger_rule': 'all_success',
     "params":{
         "schema_name": SOURCE_SCHEMA_NAME,
-        "raw_table_name": RAW_TABLE_NAME,
+        "air_quality_table_name": AIR_QUALITY_RAW_TABLE_NAME,
+        "air_quality_staging_table_name": f"{AIR_QUALITY_RAW_TABLE_NAME}_staging",
         "city_coordinates_table_name": CITY_COORDINATES_TABLE_NAME,
+        "air_quality_audit_table_name": f"{AIR_QUALITY_RAW_TABLE_NAME}_audit_table",
         }
 }
 
@@ -119,6 +122,7 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
     modifies output_rows in place to contain insert ready rows with data from city_dict and json payload
     based on fields in RAW_TABLE_COLUMNS
     '''
+    import hashlib, json
     lat = float(city_dict["latitude_coordinate"])
     lon = float(city_dict["longitude_coordinate"])
 
@@ -126,10 +130,9 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
 
     for entry in payload.get("list", []):
         comp = entry.get("components", {}) or {}
+
         if comp:
-            row_count += 1
-            output_rows.append((
-                lon,
+            output_row = [lon,
                 lat,
                 comp.get("co"),
                 comp.get("no"),
@@ -141,8 +144,11 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
                 comp.get("nh3"),
                 (entry.get("main") or {}).get("aqi"),
                 entry["dt"],
-                dag_run_id,
-            ))
+                dag_run_id,]
+            row_hash = hashlib.md5(json.dumps(output_row).encode('utf-8')).hexdigest()
+            output_row.append(row_hash)
+            output_rows.append(output_row)
+            row_count += 1
     logger.info(f"{row_count} queued for insertion")
 
 @dag(
@@ -198,7 +204,8 @@ def air_quality_historical():
                     city_coordinates_list.append(city_dict)
                 except Exception as e:
                     logger.warning(f"Error encountered parsing city row in CSV: {e}")
-                    
+
+        # TODO: get city coordinates from audit table during this time period. if the city is already done, remove            
         return city_coordinates_list
 
     @task_group
@@ -235,8 +242,7 @@ def air_quality_historical():
             )
 
         @task
-        def write_air_pollution_data(_city_coordinates: list[dict[str, Any]]):
-            # TODO: make writes idempotent
+        def stage_air_pollution_data(_city_coordinates: list[dict[str, Any]]):
             context = get_current_context()
             dag_run_id = context["dag_run"].run_id
 
@@ -273,15 +279,20 @@ def air_quality_historical():
                 logger.warning("No rows fetched — skipping insert")
             else:
                 ch_hook.bulk_insert_rows(
-                    table=f"{SOURCE_SCHEMA_NAME}.{RAW_TABLE_NAME}", 
+                    table=f"{SOURCE_SCHEMA_NAME}.{default_args["params"]["air_quality_staging_table_name"]}", 
                     rows=insert_rows_with_city_data, 
                     column_names=RAW_TABLE_COLUMNS
                 )
 
+        write_air_pollution_data = SQLExecuteQueryOperator(
+        task_id='write_air_pollution_data',
+        sql = f"sql/write_air_pollution_data.sql",
+        conn_id=CLICKHOUSE_CONN,
+    )
         write_city_data_task = write_city_data(city_coordinates)
-        write_air_pollution_data_task = write_air_pollution_data(city_coordinates)
+        stage_air_pollution_data_task = stage_air_pollution_data(city_coordinates)
 
-        truncate_city_coordinates >> write_city_data_task >> write_air_pollution_data_task
+        truncate_city_coordinates >> write_city_data_task >> stage_air_pollution_data_task >> write_air_pollution_data
     
     @task()
     def create_bucket_if_not_exists():
