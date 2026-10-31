@@ -1,5 +1,5 @@
 select 
-    {{ dbt_utils.generate_surrogate_key(['latitude_coordinate', 'longitude_coordinate']) }} as temp_key,
+    {{ dbt_utils.generate_surrogate_key(['latitude_coordinate', 'longitude_coordinate']) }} as lat_and_long_encoding_id,
     latitude_coordinate,
     longitude_coordinate,
     city,
