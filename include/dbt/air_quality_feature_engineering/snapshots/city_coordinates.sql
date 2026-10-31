@@ -20,7 +20,8 @@ select
     latitude_coordinate,
     longitude_coordinate,
     city,
-    country
+    country,
+    lat_and_long_encoding_id
 from {{ ref('stg_weather_raw__city_coordinates') }}
 
 {% endsnapshot %}

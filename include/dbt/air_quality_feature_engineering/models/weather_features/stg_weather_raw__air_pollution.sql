@@ -19,7 +19,8 @@ city_coordinates as (
     select 
         longitude_coordinate,
         latitude_coordinate,
-        city_coordinates_id
+        city_coordinates_id,
+        lat_and_long_encoding_id
     from {{ ref('city_coordinates') }} -- the snapshot table showing the most recent names of the places
     where ({{ dbt.current_timestamp() }} <= valid_to and {{ dbt.current_timestamp() }}>= valid_from)
 
@@ -27,6 +28,7 @@ city_coordinates as (
 select 
     city_coordinates.longitude_coordinate,
     city_coordinates.latitude_coordinate,
+    lat_and_long_encoding_id,
     co_concentration,
     no_concentration,
     no2_concentration,
