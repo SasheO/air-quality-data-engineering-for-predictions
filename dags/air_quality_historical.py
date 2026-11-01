@@ -155,6 +155,7 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
 @dag(
     dag_id="air_quality_historical",
     start_date=datetime(2023, 1, 1),
+    end_date=datetime(2026, 11, 1),
     schedule="0 6 1 * *", # get data for previous month on first of the next month at 6 AM
     template_searchpath=[INCLUDE_PATH],
     default_args=default_args,
@@ -243,18 +244,16 @@ def air_quality_historical():
             )
 
         @task
-        def stage_air_pollution_data(_city_coordinates: list[dict[str, Any]]):
-            # TODO: it's a bug here because this should be getting the previous month of execution date, not datetime now!
+        def ingest_air_pollution_data(_city_coordinates: list[dict[str, Any]]):
             context = get_current_context()
             dag_run_id = context["dag_run"].run_id
-            date_interval_start = context["data_interval_start"]
-            date_interval_end = context["data_interval_end"]
-            logger.info(f"date_interval_start: {type(date_interval_start)} {date_interval_start}; date_interval_end: {type(date_interval_end)} {date_interval_end}")
+            date_interval_start = context["data_interval_start"].subtract(hours=6) # subtract 6 hours because the pipeline at 6 am but i want from midnight on previous month to midnight just before this month starts
+            date_interval_end = context["data_interval_end"].subtract(hours=6, seconds=1) # subtract 6 hours because the pipeline at 6 am but i want from midnight on previous month to midnight just before this month starts
 
             insert_rows_with_city_data = []
 
             start_time_unix = int(date_interval_start.timestamp())
-            end_time_unix = int(date_interval_end.timestamp()) - 1 # subtract one to avoid getting duplicates of the same month
+            end_time_unix = int(date_interval_end.timestamp())
 
             for city_dict in _city_coordinates:
                 logger.info(f"Fetching historical data from {date_interval_start} to {date_interval_end} for {city_dict.get('city')}, {city_dict.get('country')}")
@@ -291,9 +290,9 @@ def air_quality_historical():
         conn_id=CLICKHOUSE_CONN,
     )
         write_city_data_task = write_city_data(city_coordinates)
-        stage_air_pollution_data_task = stage_air_pollution_data(city_coordinates)
+        ingest_air_pollution_data_task = ingest_air_pollution_data(city_coordinates)
 
-        truncate_city_coordinates >> write_city_data_task >> stage_air_pollution_data_task >> write_air_pollution_data
+        truncate_city_coordinates >> write_city_data_task >> ingest_air_pollution_data_task >> write_air_pollution_data
     
     @task()
     def create_bucket_if_not_exists():
@@ -306,7 +305,7 @@ def air_quality_historical():
         else:
             logger.info(f"Bucket {MINIO_BUCKET_NAME} already exists. Skipping creation.")
     
-    dbt_models = DbtTaskGroup(
+    dbt_models = DbtTaskGroup( # TODO: separate staging models target schema/database from snapshots and marts, if possible to maintain logical separation of silver/gold layers
         group_id = "dbt_models",
         project_config = project_config,
         profile_config = profile_config,
