@@ -173,7 +173,7 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
     doc_md=DOC_MD,
     max_active_runs=1
 )
-def air_quality_historical():
+def air_quality_live():
 
     create_schema_if_not_exists = SQLExecuteQueryOperator(
         task_id='create_databases_if_not_exists',
