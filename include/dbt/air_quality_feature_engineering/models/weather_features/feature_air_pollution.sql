@@ -125,6 +125,14 @@ select
     ) AS aqi_6_hour_ahead
 
 from {{ ref('stg_weather_raw__air_pollution') }}
+{% if is_incremental() %}
+
+  -- this filter will only be applied on an incremental run
+  -- (uses >= to include records whose timestamp occurred since the last run of this model)
+  -- (If event_time is NULL or the table is truncated, the condition will always be true and load all records)
+where time_of_measurement > (select coalesce(max(time_of_measurement),'1970-01-01') from {{ this }} )
+
+{% endif %}
 
 window
     w_1h   as (partition by lat_and_long_encoding_id order by time_of_measurement range between 3600  preceding and 3600  preceding),
@@ -135,11 +143,4 @@ window
     w_roll_24h as (partition by lat_and_long_encoding_id order by time_of_measurement range between 86400 preceding and current row),
     w_roll_72h as (partition by lat_and_long_encoding_id order by time_of_measurement range between 259200 preceding and current row)
 
-{% if is_incremental() %}
 
-  -- this filter will only be applied on an incremental run
-  -- (uses >= to include records whose timestamp occurred since the last run of this model)
-  -- (If event_time is NULL or the table is truncated, the condition will always be true and load all records)
-where time_of_measurement >= (select coalesce(max(time_of_measurement),'1970-01-01') from {{ this }} )
-
-{% endif %}
