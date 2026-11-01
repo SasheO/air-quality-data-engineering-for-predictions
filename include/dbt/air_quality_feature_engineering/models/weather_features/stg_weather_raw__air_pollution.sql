@@ -22,7 +22,10 @@ city_coordinates as (
         dbt_scd_id as city_coordinates_scd_id,
         lat_and_long_encoding_id
     from {{ ref('city_coordinates') }} -- the snapshot table showing the most recent names of the places
-    where ({{ dbt.current_timestamp() }} <= dbt_valid_to and {{ dbt.current_timestamp() }}>= dbt_valid_from)
+    where (
+        (dbt_valid_to is null or {{ dbt.current_timestamp() }} <= dbt_valid_to) 
+        and {{ dbt.current_timestamp() }} >= dbt_valid_from
+    )
 
 )
 select 
