@@ -131,6 +131,13 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
     for entry in payload.get("list", []):
         comp = entry.get("components", {}) or {}
 
+        aqi = (entry.get("main") or {}).get("aqi")
+        try:
+            aqi = int(aqi)
+        except Exception as e:
+            logger.warning(f"aqi {aqi} is not a number, failing safe to aqi=0: {e}")
+            aqi = 0 # 0 is an error row because aqi goes from 1-5
+
         if comp:
             output_row = [lon,
                 lat,
@@ -142,7 +149,7 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
                 comp.get("pm2_5"),
                 comp.get("pm10"),
                 comp.get("nh3"),
-                (entry.get("main") or {}).get("aqi"),
+                aqi,
                 entry["dt"],
                 ]
             row_hash = hashlib.md5(json.dumps(output_row).encode('utf-8')).hexdigest()
@@ -333,6 +340,4 @@ def air_quality_historical():
 
     cbine >> dbt_models >> generate_dbt_docs_to_minio_bucket 
     
-    # TODO: after dbt_models does feature extraction, the model should be loaded from minio and used to predict features in the serving layer
-
 air_quality_historical_dag = air_quality_historical()
