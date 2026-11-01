@@ -144,8 +144,9 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
                 comp.get("nh3"),
                 (entry.get("main") or {}).get("aqi"),
                 entry["dt"],
-                dag_run_id,]
+                ]
             row_hash = hashlib.md5(json.dumps(output_row).encode('utf-8')).hexdigest()
+            output_row.append(dag_run_id)
             output_row.append(row_hash)
             output_rows.append(output_row)
             row_count += 1
@@ -205,7 +206,6 @@ def air_quality_historical():
                 except Exception as e:
                     logger.warning(f"Error encountered parsing city row in CSV: {e}")
 
-        # TODO: get city coordinates from audit table during this time period. if the city is already done, remove            
         return city_coordinates_list
 
     @task_group
@@ -227,7 +227,8 @@ def air_quality_historical():
             if not _city_coordinates:
                 logger.info(f"Empty city_coordinates: {_city_coordinates}; exiting...")
                 return
-            logger.info(f"city_coordinates: {_city_coordinates}; exiting...")
+            
+            logger.info(f"city_coordinates: {_city_coordinates}")
             
             city_coordinates_insert_data = []
             column_names = list(_city_coordinates[0].keys())
@@ -243,20 +244,20 @@ def air_quality_historical():
 
         @task
         def stage_air_pollution_data(_city_coordinates: list[dict[str, Any]]):
+            # TODO: it's a bug here because this should be getting the previous month of execution date, not datetime now!
             context = get_current_context()
             dag_run_id = context["dag_run"].run_id
+            date_interval_start = context["data_interval_start"]
+            date_interval_end = context["data_interval_end"]
+            logger.info(f"date_interval_start: {type(date_interval_start)} {date_interval_start}; date_interval_end: {type(date_interval_end)} {date_interval_end}")
 
             insert_rows_with_city_data = []
-            
-            today = datetime.now(timezone.utc)
-            first_day_this_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            first_day_prev_month = (first_day_this_month - timedelta(days=1)).replace(day=1)
 
-            start_time_unix = int(first_day_prev_month.timestamp())
-            end_time_unix = int(first_day_this_month.timestamp())
+            start_time_unix = int(date_interval_start.timestamp())
+            end_time_unix = int(date_interval_end.timestamp()) - 1 # subtract one to avoid getting duplicates of the same month
 
             for city_dict in _city_coordinates:
-                logger.info(f"Fetching historical data from {first_day_prev_month} to {first_day_this_month} for {city_dict.get('city')}, {city_dict.get('country')}")
+                logger.info(f"Fetching historical data from {date_interval_start} to {date_interval_end} for {city_dict.get('city')}, {city_dict.get('country')}")
                 lat = city_dict.get("latitude_coordinate")
                 lon = city_dict.get("longitude_coordinate")
                 resp = requests.get(
