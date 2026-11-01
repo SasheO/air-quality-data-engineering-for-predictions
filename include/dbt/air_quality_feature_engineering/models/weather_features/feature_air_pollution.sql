@@ -1,9 +1,9 @@
 select
 
-    {{ dbt_utils.generate_surrogate_key(['time_of_measurement', 'city_coordinates_id']) }} as air_pollution_features_row_id,
+    {{ dbt_utils.generate_surrogate_key(['time_of_measurement', 'city_coordinates_scd_id']) }} as air_pollution_features_row_id,
 
     time_of_measurement,
-    city_coordinates_id, -- TODO: convert this to hot enconding of cities
+    lat_and_long_encoding_id, -- TODO: convert this to hot enconding of cities
     co_concentration,
     no_concentration,
     no2_concentration,
@@ -112,18 +112,18 @@ select
 -- Target — AQI 6 hours ahead (gap-aware; NULL when future row missing)
 -- ============================================================
     any(aqi) OVER (
-        partition by city_coordinates_id
+        partition by lat_and_long_encoding_id
         ORDER BY time_of_measurement
-        RANGE BETWEEN INTERVAL 21600 FOLLOWING AND INTERVAL 21600 FOLLOWING
+        RANGE between 21600 FOLLOWING and 21600 FOLLOWING
     ) AS aqi_6_hour_ahead
 
 from {{ ref('stg_weather_raw__air_pollution') }}
 
 window
-    w_1h   as (partition by city_coordinates_id order by time_of_measurement range between interval 3600  preceding and interval 3600  preceding),
-    w_3h   as (partition by city_coordinates_id order by time_of_measurement range between interval 10800 preceding and interval 10800 preceding),
-    w_24h  as (partition by city_coordinates_id order by time_of_measurement range between interval 86400 preceding and interval 86400 preceding),
-    w_168h as (partition by city_coordinates_id order by time_of_measurement range between interval 604800 preceding and interval 604800 preceding),
-    w_roll_6h  as (partition by city_coordinates_id order by time_of_measurement range between interval 21600 preceding and current row),
-    w_roll_24h as (partition by city_coordinates_id order by time_of_measurement range between interval 86400 preceding and current row),
-    w_roll_72h as (partition by city_coordinates_id order by time_of_measurement range between interval 259200 preceding and current row)
+    w_1h   as (partition by lat_and_long_encoding_id order by time_of_measurement range between 3600  preceding and 3600  preceding),
+    w_3h   as (partition by lat_and_long_encoding_id order by time_of_measurement range between 10800 preceding and 10800 preceding),
+    w_24h  as (partition by lat_and_long_encoding_id order by time_of_measurement range between 86400 preceding and 86400 preceding),
+    w_168h as (partition by lat_and_long_encoding_id order by time_of_measurement range between 604800 preceding and 604800 preceding),
+    w_roll_6h  as (partition by lat_and_long_encoding_id order by time_of_measurement range between 21600 preceding and current row),
+    w_roll_24h as (partition by lat_and_long_encoding_id order by time_of_measurement range between 86400 preceding and current row),
+    w_roll_72h as (partition by lat_and_long_encoding_id order by time_of_measurement range between 259200 preceding and current row)

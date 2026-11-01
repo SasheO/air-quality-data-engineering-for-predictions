@@ -6,22 +6,11 @@
       unique_key = 'lat_and_long_encoding_id',
       strategy='check',
       check_cols=['city', 'country'],
-      snapshot_meta_column_names={
-        'dbt_valid_from': 'valid_from',
-        'dbt_valid_to': 'valid_to',
-        'dbt_scd_id': '',
-        'dbt_updated_at': 'snapshot_updated_at',
-        'dbt_is_deleted': 'is_deleted'
-      }
     )
 }}
 
 select 
-    latitude_coordinate,
-    longitude_coordinate,
-    city,
-    country,
-    lat_and_long_encoding_id
+    *
 from {{ ref('stg_weather_raw__city_coordinates') }}
 
 {% endsnapshot %}
