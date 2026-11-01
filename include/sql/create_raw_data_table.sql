@@ -16,7 +16,7 @@ create table if not exists {{ params.schema_name }}.{{ params.air_quality_table_
     row_content_hash String
 )
 ENGINE = MergeTree()
-ORDER BY (longitude_coordinate, latitude_coordinate, time_of_measurement);
+ORDER BY (time_of_measurement, longitude_coordinate, latitude_coordinate);
 
 create or replace table {{ params.schema_name }}.{{ params.air_quality_staging_table_name }} (
     longitude_coordinate Decimal(10, 7), 
