@@ -114,6 +114,34 @@ select
     toHour(time_of_measurement)                        AS hour_of_day,
     toDayOfWeek(time_of_measurement)                   AS day_of_week,   -- ISO: 1=Mon … 7=Sun
     toDayOfWeek(time_of_measurement) IN (6, 7)         AS is_weekend,
+    toMonth(time_of_measurement)                        AS month_of_the_year,
+    multiIf(
+        -- Tropical / Equatorial Zone (Wet vs. Dry)
+        abs(city_coordinates.latitude_coordinate) <= 23.5, 
+        multiIf(
+            month_of_the_year IN (5, 6, 7, 8, 9, 10), 'Rainy Season',
+            'Dry Season'
+        ),
+        
+        -- Northern Hemisphere (Conventional Seasons)
+        city_coordinates.latitude_coordinate > 23.5,
+        multiIf(
+            month_of_the_year IN (12, 1, 2), 'Winter',
+            month_of_the_year IN (3, 4, 5),  'Spring',
+            month_of_the_year IN (6, 7, 8),  'Summer',
+            'Autumn'
+        ),
+        
+        -- Southern Hemisphere (Conventional Seasons - Inverted)
+        city_coordinates.latitude_coordinate < -23.5,
+        multiIf(
+            month_of_the_year IN (12, 1, 2), 'Summer',
+            month_of_the_year IN (3, 4, 5),  'Autumn',
+            month_of_the_year IN (6, 7, 8),  'Winter',
+            'Spring'
+        ),
+        'Unknown'
+    ) AS season,
 
 -- ============================================================
 -- Target — AQI 6 hours ahead (gap-aware; NULL when future row missing)
