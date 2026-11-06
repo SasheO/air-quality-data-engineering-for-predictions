@@ -166,7 +166,7 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
     dag_id="air_quality_historical",
     start_date=datetime(2023, 1, 1),
     end_date=datetime(2026, 11, 1),
-    schedule="0 6 1 * *", # get data for previous month on first of the next month at 6 AM
+    schedule="5 * * * *", # get data for this hour at **:05
     template_searchpath=[INCLUDE_PATH],
     default_args=default_args,
     catchup=True,
@@ -256,7 +256,7 @@ def air_quality_live():
         @task
         def ingest_air_pollution_data(_city_coordinates: list[dict[str, Any]]):
             pass
-            # TODO: this needs to get current data for all rows 
+            # TODO: this needs to get current data for all cities
 
         write_air_pollution_data = SQLExecuteQueryOperator(
         task_id='write_air_pollution_data',
