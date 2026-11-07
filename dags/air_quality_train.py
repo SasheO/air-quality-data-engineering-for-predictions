@@ -6,21 +6,19 @@ from airflow.decorators import (
     dag,
     )
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-import pickle
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from dotenv import load_dotenv
-from lightgbm import LGBMClassifier
-from sklearn.metrics import accuracy_score
 from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME")
+MINIO_AIR_QUALITY_MODELS_PATH = 'air_quality_models'
 MINIO_CONN_ID = "minio_conn"
 EMAIL_ON_FAILURE_LIST = [os.getenv("MY_EMAIL")]
 INCLUDE_PATH = '/opt/airflow/include'
 CLICKHOUSE_CONN = "clickhouse_conn"
+SECRET_SIGNING_KEY = os.getenv("SECRET_SIGNING_KEY")
 
 with open(f"{INCLUDE_PATH}/doc_md/air_quality_train.md", "r", encoding="utf-8") as file:
     DOC_MD = file.read() 
@@ -29,6 +27,7 @@ default_args = {
     "depends_on_past": False, 
     "retries": 2,
     "retry_delay": timedelta(minutes=3),
+    'email': EMAIL_ON_FAILURE_LIST,
     'email_on_failure': False, # TODO: should be True. set up email mechanism so you get failures when failed.
     'email_on_retry': False,
     'execution_timeout': timedelta(minutes=30),
@@ -37,6 +36,10 @@ default_args = {
 
 @task_group()
 def train_and_save_model():
+    from lightgbm import LGBMClassifier
+    from sklearn.metrics import accuracy_score
+    import pandas as pd
+
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
     clickhouse_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
     clickhouse_client = clickhouse_hook.get_client()
@@ -79,18 +82,43 @@ def train_and_save_model():
     @task()
     def pickle_and_save_model_to_bucket():
         '''
-        TODO: create a helper function that writes training stats, data stats e.g. mean and variance, to audit table
-        pickle model to serialise it in memory
-        sign with hmac for security so malicious files uploaded to my bucket don't get decoded
-        then save it using s3_hook to minio bucket in a `train-<datestamp>` folder with a metadata description file.
+        TODO: 
+        investigate where in the bucket air quality stuff are being stored
+        check if daily run folder and file already exists
+        - [ ] create a helper function that writes training stats (min time_of_measurement, max timme_of_measurement, loss, accuracy, etc), data stats e.g. mean and variance, to audit table
+        - [x] pickle model to serialise it in memory
+        https://docs.python.org/3/library/pickle.html
+        - [ ] sign with hmac for security so malicious files uploaded to my bucket don't get decoded
+        https://docs.python.org/3/library/hmac.html#module-hmac
+        - [ ] then save it using s3_hook to minio bucket in a `train-<datestamp>` folder with a metadata description file.
         '''
+        import hashlib
+        import hmac
+        import pickle
 
-        return
+        model_obj = pickle.dumps(model)
+        signature = hmac.new(SECRET_SIGNING_KEY, model_obj, hashlib.sha256).hexdigest()
+        signed_package = {"signature": signature, "payload": model_obj}
+        signed_package_obj = pickle.dumps(signed_package)
 
+        today_date_str = date.today().isoformat()
+        folder_prefix = f'{MINIO_AIR_QUALITY_MODELS_PATH}/train-{today_date_str}'
+        
+        model_storage_name="model.pkl"
+    
+        # use list_keys to check if any objects exist under that prefix
+        keys = s3_hook.list_keys(
+            bucket_name=MINIO_BUCKET_NAME, 
+            prefix=folder_prefix,
+            delimiter='/',
+        )
+
+        if len(keys)>0:
+            model_storage_name=f"model{len(keys)}.pkl"
 
         s3_hook.load_file_obj(
-            file_obj=extracted_file,
-            key="raw_data/"+object_name,
+            file_obj=signed_package_obj,
+            key=f"{folder_prefix}/"+model_storage_name,
             bucket_name=MINIO_BUCKET_NAME,
             replace=True  # Overwrites the file if it already exists in S3
         )

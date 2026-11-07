@@ -49,6 +49,8 @@ MINIO_CONN_ID="minio_conn"
 
 OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY") 
 
+EMAIL_ON_FAILURE_LIST = [os.getenv("MY_EMAIL")]
+
 RAW_TABLE_COLUMNS = [
     "longitude_coordinate",
     "latitude_coordinate",
@@ -96,6 +98,7 @@ default_args = {
     "depends_on_past": True, 
     "retries": 2,
     "retry_delay": timedelta(minutes=3),
+    'email': EMAIL_ON_FAILURE_LIST,
     'email_on_failure': False, # TODO: should be True. set up email mechanism so you get failures when failed.
     'email_on_retry': False,
     'execution_timeout': timedelta(minutes=30),

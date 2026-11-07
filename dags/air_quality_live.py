@@ -42,6 +42,7 @@ CLICKHOUSE_CONN = "clickhouse_conn"
 MINIO_CONN = "minio_conn"
 INCLUDE_PATH = '/opt/airflow/include'
 AIR_QUAILTY_DBT_PROJECT_PATH=f"{INCLUDE_PATH}/dbt/air_quality_feature_engineering"
+EMAIL_ON_FAILURE_LIST = [os.getenv("MY_EMAIL")]
 
 SOURCE_SCHEMA_NAME = 'weather_raw'
 AIR_QUALITY_RAW_TABLE_NAME = 'air_pollution'
@@ -99,7 +100,8 @@ default_args = {
     "depends_on_past": True, 
     "retries": 2,
     "retry_delay": timedelta(minutes=3),
-    'email_on_failure': False,
+    'email': EMAIL_ON_FAILURE_LIST,
+    'email_on_failure': False, # TODO: should be True
     'email_on_retry': False,
     'execution_timeout': timedelta(minutes=30),
     'trigger_rule': 'all_success',
