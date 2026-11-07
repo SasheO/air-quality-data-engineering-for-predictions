@@ -19,6 +19,7 @@ EMAIL_ON_FAILURE_LIST = [os.getenv("MY_EMAIL")]
 INCLUDE_PATH = '/opt/airflow/include'
 CLICKHOUSE_CONN = "clickhouse_conn"
 SECRET_SIGNING_KEY = os.getenv("SECRET_SIGNING_KEY")
+MODEL_CLASS="air_quality"
 
 with open(f"{INCLUDE_PATH}/doc_md/air_quality_train.md", "r", encoding="utf-8") as file:
     DOC_MD = file.read() 
@@ -88,16 +89,18 @@ def train_and_save_model():
         - [ ] create a helper function that writes training stats (min time_of_measurement, max timme_of_measurement, loss, accuracy, etc), data stats e.g. mean and variance, to audit table
         - [x] pickle model to serialise it in memory
         https://docs.python.org/3/library/pickle.html
-        - [ ] sign with hmac for security so malicious files uploaded to my bucket don't get decoded
+        - [x] sign with hmac for security so malicious files uploaded to my bucket don't get decoded
         https://docs.python.org/3/library/hmac.html#module-hmac
-        - [ ] then save it using s3_hook to minio bucket in a `train-<datestamp>` folder with a metadata description file.
+        - [x] then save it using s3_hook to minio bucket in a `train-<datestamp>` folder 
+        - [ ] add a metadata description file.
         '''
         import hashlib
         import hmac
         import pickle
+        import io
 
         model_obj = pickle.dumps(model)
-        signature = hmac.new(SECRET_SIGNING_KEY, model_obj, hashlib.sha256).hexdigest()
+        signature = hmac.new(SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
         signed_package = {"signature": signature, "payload": model_obj}
         signed_package_obj = pickle.dumps(signed_package)
 
@@ -106,18 +109,17 @@ def train_and_save_model():
         
         model_storage_name="model.pkl"
     
-        # use list_keys to check if any objects exist under that prefix
+        # check if any objects exist under that prefix and number models if so, number the model e.g. more than one model trained in the same day
         keys = s3_hook.list_keys(
             bucket_name=MINIO_BUCKET_NAME, 
             prefix=folder_prefix,
             delimiter='/',
         )
-
         if len(keys)>0:
             model_storage_name=f"model{len(keys)}.pkl"
 
         s3_hook.load_file_obj(
-            file_obj=signed_package_obj,
+            file_obj=io.BytesIO(signed_package_obj),
             key=f"{folder_prefix}/"+model_storage_name,
             bucket_name=MINIO_BUCKET_NAME,
             replace=True  # Overwrites the file if it already exists in S3
