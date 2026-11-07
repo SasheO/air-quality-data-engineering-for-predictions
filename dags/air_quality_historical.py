@@ -96,7 +96,7 @@ default_args = {
     "depends_on_past": True, 
     "retries": 2,
     "retry_delay": timedelta(minutes=3),
-    'email_on_failure': False,
+    'email_on_failure': False, # TODO: should be True. set up email mechanism so you get failures when failed.
     'email_on_retry': False,
     'execution_timeout': timedelta(minutes=30),
     'trigger_rule': 'all_success',
