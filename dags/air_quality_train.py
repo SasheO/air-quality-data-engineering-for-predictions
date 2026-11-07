@@ -38,8 +38,8 @@ default_args = {
 @task_group()
 def train_and_save_model():
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
-    hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
-    clickhouse_client = hook.get_conn()
+    clickhouse_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
+    clickhouse_client = clickhouse_hook.get_conn()
     model=LGBMClassifier()
 
     @task()
