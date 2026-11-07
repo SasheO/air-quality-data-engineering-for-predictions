@@ -39,7 +39,7 @@ default_args = {
 def train_and_save_model():
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
     clickhouse_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
-    clickhouse_client = clickhouse_hook.get_conn()
+    clickhouse_client = clickhouse_hook.get_client()
     model=LGBMClassifier()
 
     @task()
@@ -98,14 +98,17 @@ def train_and_save_model():
     train_model() >> pickle_and_save_model_to_bucket()
 
 @dag(
-    dag_id="air_quality_historical",
+    dag_id="air_quality_train",
     start_date=datetime(2026, 11, 1),
     schedule=None, # only when triggered
     template_searchpath=[INCLUDE_PATH],
     default_args=default_args,
     catchup=True,
     doc_md=DOC_MD,
-    max_active_runs=1
+    max_active_runs=1,
+    tags=["air_quality", "model_training"],  # Add your tags here
 )
 def air_quality_train():
-    pass
+    tr = train_and_save_model()
+
+air_quality_train_dag = air_quality_train()
