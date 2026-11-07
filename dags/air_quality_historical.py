@@ -168,7 +168,8 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
     default_args=default_args,
     catchup=True,
     doc_md=DOC_MD,
-    max_active_runs=1
+    max_active_runs=1,
+    tags=["air_quality"],
 )
 def air_quality_historical():
 

@@ -163,15 +163,15 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
     logger.info(f"{row_count} queued for insertion")
 
 @dag(
-    dag_id="air_quality_historical",
-    start_date=datetime(2023, 1, 1),
-    end_date=datetime(2026, 11, 1),
+    dag_id="air_quality_live",
+    start_date=datetime(2026, 11, 1),
     schedule="5 * * * *", # get data for this hour at **:05
     template_searchpath=[INCLUDE_PATH],
     default_args=default_args,
     catchup=True,
     doc_md=DOC_MD,
-    max_active_runs=1
+    max_active_runs=1,
+    tags=["air_quality", "model_serving"],
 )
 def air_quality_live():
 
@@ -309,4 +309,4 @@ def air_quality_live():
     
     # TODO: after dbt_models does feature extraction, the model should be loaded from minio and used to predict features in the serving layer
 
-air_quality_historical_dag = air_quality_historical()
+air_quality_live_dag = air_quality_live()
