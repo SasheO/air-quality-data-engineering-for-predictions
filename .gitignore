@@ -9,3 +9,4 @@ todo.txt
 *.log
 *__pycache__*
 include/notebooks/.ipynb_checkpoints/train_model_scratch-checkpoint.ipynb
+dags/loading_signed_model.py
