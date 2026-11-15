@@ -1,4 +1,6 @@
-CREATE TABLE IF NOT EXISTS ml_model_stats
+CREATE DATABASE IF NOT EXISTS monitoring;
+
+CREATE TABLE IF NOT EXISTS monitoring.ml_model_stats
 (
     -- Identity / classification
     model_name       LowCardinality(String)   COMMENT 'Human-readable model name',

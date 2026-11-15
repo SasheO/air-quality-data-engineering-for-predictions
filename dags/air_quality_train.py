@@ -97,6 +97,7 @@ def train_and_save_model():
             "y_train_var": Y_train.var(),
             "y_test_mean": Y_test.mean(),
             "y_test_var": Y_test.var(),
+            "model_accuraccy_pct_score": acs,
         }
 
         return model_stats
@@ -105,16 +106,8 @@ def train_and_save_model():
     @task()
     def pickle_and_save_model_to_bucket(model_stats: dict):
         '''
-        TODO: 
-        investigate where in the bucket air quality stuff are being stored
-        check if daily run folder and file already exists
-        - [ ] create a helper function that writes training stats (min time_of_measurement, max timme_of_measurement, loss, accuracy, etc), data stats e.g. mean and variance, to audit table
-        - [x] pickle model to serialise it in memory
-        https://docs.python.org/3/library/pickle.html
-        - [x] sign with hmac for security so malicious files uploaded to my bucket don't get decoded
-        https://docs.python.org/3/library/hmac.html#module-hmac
-        - [x] then save it using s3_hook to minio bucket in a `train-<datestamp>` folder 
-        - [ ] add a json description file saying what model, model1, etc is or does, maybe basic stats on it..
+        saves model to air_quality/air_quality_models/train-<date-of-training>/<model-name>
+        it also saves information on the model to air_quality/air_quality_models/train-<date-of-training>/model_info.json, keyed by <model-name>
         '''
         import hashlib
         import hmac
@@ -127,50 +120,63 @@ def train_and_save_model():
         today_date_str = date.today().isoformat()
         folder_prefix = f'{MINIO_AIR_QUALITY_MODELS_PATH}/train-{today_date_str}'
         
-        model_storage_name="model.pkl"
-        json_metadata_file_name = "model_info.json"
     
         # check if any objects exist under that prefix and number models if so, number the model e.g. more than one model trained in the same day
         keys = s3_hook.list_keys(
             bucket_name=MINIO_BUCKET_NAME, 
             prefix=folder_prefix,
-            delimiter='/',
         )
+
         if len(keys)>0:
-            model_storage_name=f"model{len(keys)-1}.pkl"
+            model_storage_name = f"model{len(keys)-1}.pkl"
+        else:
+            model_storage_name = "model.pkl"
+
+        model_storage_key=f"{folder_prefix}/{model_storage_name}"
 
         s3_hook.load_file_obj(
             file_obj=io.BytesIO(model_obj),
-            key=f"{folder_prefix}/"+model_storage_name,
+            key=model_storage_key,
             bucket_name=MINIO_BUCKET_NAME,
         )
 
-        if s3_hook.check_for_key(json_metadata_file_name, MINIO_BUCKET_NAME):
-            # load key and convert it to json, 
-            # add new entry keyed with train-<timestamp> with the signature, the loss, the efficiency, model type (LGBM...), etc etc 
-            # then save key
-            metadata_json = json.loads(s3_hook.get_key(json_metadata_file_name, MINIO_BUCKET_NAME).get()["Body"].read())
-            pass
+        json_file_key = f"{folder_prefix}/"+"model_info.json"
+
+        if s3_hook.check_for_key(json_file_key, MINIO_BUCKET_NAME):
+            logger.info(f"Appending metadata")
+            # if json metadata file already exists, get the existing json, update it, and write back
+            metadata_json = json.loads(s3_hook.get_key(json_file_key, MINIO_BUCKET_NAME).get()["Body"].read())
         else:
-            # create key and save it
+            logger.info(f"Writing metadata")
+            # create json metadata file if it does not yet exist
             metadata_json = {}
 
         model_stats["signature"] = signature
         metadata_json[model_storage_name] = model_stats
 
-
         metadata_jsonbuffer = io.BytesIO(json.dumps(metadata_json).encode("utf-8"))
         
+        # save medatadata to json file
         s3_hook.load_file_obj(
             file_obj=metadata_jsonbuffer,
-            key=f"{folder_prefix}/"+json_metadata_file_name,
+            key=json_file_key,
             bucket_name=MINIO_BUCKET_NAME,
+            replace=True
         )
 
     @task
     def log_model_stats_to_clickhouse(model_stats: dict):
-        # TODO: create schema for model_training_log table in create_training_model_table.sql
-        # TODO: save info to clickhouse
+        model_table_fields = [
+            "model_name", #      LowCardinality(String)   COMMENT 'Human-readable model name',
+            "model_type", #      LowCardinality(String)   COMMENT 'Algorithm family: xgboost, regressor, etc.',
+            "model_class", #      LowCardinality(String)   COMMENT 'What the model is used for e.g air_quality for air quality prediction models,',
+            "key", #             String                   COMMENT 'Unique storage key (s3 path, registry id, etc.)',
+            "loss_value", #       Float64                  COMMENT 'Primary loss/metric value',
+            "loss_function", #   LowCardinality(String)   COMMENT 'e.g. mse, logloss, mae',
+            "entry_timestamp", #  DateTime64(3, 'UTC')     COMMENT 'When this row was recorded (ms precision)',
+            "details_json", #     String                   COMMENT 'Raw JSON blob (use JSONExtract* to query)',
+            "first_entry", #      Bool DEFAULT false                     COMMENT 'true only for the initial training entry per key'
+            ]
         pass        
 
     model_stats = train_model() 
