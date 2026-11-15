@@ -1,3 +1,47 @@
+"""
+# Air Quality Historical
+
+## Overview
+Fetches realtime air pollution data from the OpenWeather Air Pollution History API for each city in the `city_coordinates` table, covering the entirety of the previous calendar month. Parsed rows are bulk-inserted into `air_quality_datasets.raw` in ClickHouse, where incremental dbt models downstream transform them into features.
+
+## Schedule
+- Cron: `0 * * * *` — beginning of every hour
+- Catchup disabled; `max_active_runs=1`.
+
+
+## Tasks
+
+*TODO* UPDATE THIS
+
+### `create_databases_if_not_exists`
+SQLExecuteQueryOperator. Runs `sql/create_database.sql` against ClickHouse to create `air_quality_datasets` if it does not exist.
+
+### `create_tables_if_not_exists`
+SQLExecuteQueryOperator. Runs `sql/create_raw_data_table.sql` (split into statements) to create the `raw` and `city_coordinates` tables if they do not exist.
+
+### `refresh_city_coordinates_table`
+Reads `include/csv/latitudes_and_longitudes.csv`, casts `*_coordinate` columns to `float`, and bulk-inserts all rows into `air_quality_datasets.city_coordinates`.
+
+### `get_city_coordinates`
+Runs `sql/get_deduplicated_city_coordinates.sql` and returns a list of dicts (one per city) with the columns needed for the API call and row building (e.g. `city_coordinates_id`, `city`, `country`, `latitude_coordinate`, `longitude_coordinate`). Output is XCom'd to `write_previous_month_data`.
+
+### `write_previous_month_data`
+For each city:
+1. Computes the previous-month Unix window (`start`, `end`).
+2. Calls `http://api.openweathermap.org/data/2.5/air_pollution/history` with `lat`, `lon`, `start`, `end`, `appid`.
+3. Parses each hourly entry via `build_rows` into a tuple matching `RAW_TABLE_COLUMNS`; entries with empty `components` are skipped.
+4. Collects all rows across all cities and performs one bulk insert into `air_quality_datasets.raw`. Skips the insert with a warning if no rows were produced.
+
+## Required Variables
+| Variable | Description |
+|---|---|
+| `OPENWEATHER_API_SECRET_KEY` | OpenWeather API key used for history requests. Set as an encrypted Airflow Variable. |
+
+Also required (as Airflow Connections):
+| Connection | Description |
+|---|---|
+| `clickhouse_conn` | ClickHouse connection used by all SQL and insert tasks. |
+"""
 import logging
 import requests
 from decimal import Decimal
@@ -76,9 +120,6 @@ render_config=RenderConfig(
         exclude=["tag:pit-correctness-test"],
     )
 
-with open(f"{INCLUDE_PATH}/doc_md/air_quality_historical.md", "r", encoding="utf-8") as file:
-    DOC_MD = file.read() 
-
 default_args = {
     "depends_on_past": True, 
     "retries": 2,
@@ -112,7 +153,7 @@ def read_sql_script(relative_include_path:str) -> str:
     template_searchpath=[INCLUDE_PATH],
     default_args=default_args,
     catchup=False,
-    doc_md=DOC_MD,
+    doc_md=__doc__,
     max_active_runs=1,
     tags=["air_quality", "model_serving"],
 )
