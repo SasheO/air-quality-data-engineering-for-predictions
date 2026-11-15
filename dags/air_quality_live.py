@@ -94,7 +94,7 @@ OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY")
 SECRET_SIGNING_KEY = os.getenv("SECRET_SIGNING_KEY")
 
 # TODO: think of an automatic way of getting the most recently trained and accurate model that does not involve passing in the model key
-MODEL_KEY = "air-quality/air_quality_models/train-2026-11-15/model.pkl"
+MODEL_KEY = "air_quality_models/train-2026-11-15/model.pkl"
 
 
 profile_config = ProfileConfig(
@@ -315,12 +315,12 @@ def air_quality_live():
 
         create_live_data_view_if_not_exists = SQLExecuteQueryOperator(
             task_id='create_live_data_view_if_not_exists',
-            sql = f"""create view {FEATURES_SCHEMA_NAME}.feature_air_pollution_latest
+            sql = f"""create view if not exists {FEATURES_SCHEMA_NAME}.feature_air_pollution_latest
             as
             SELECT 
                 *
             FROM {FEATURES_SCHEMA_NAME}.feature_air_pollution
-            where created_at >= (now() - (INTERVAL 6 HOUR + INTERVAL 30 MINUTE))
+            where time_of_measurement_utc >= (now('UTC') - (INTERVAL 6 HOUR + INTERVAL 30 MINUTE))
             and aqi_6_hour_ahead is null
             COMMENT 'Gets the most recent rows for which the target column of aqi_6_hours_ahead is not known from {FEATURES_SCHEMA_NAME}.feature_air_pollution';
             """,
@@ -328,8 +328,7 @@ def air_quality_live():
         )
 
         @task
-        def extract_and_verify_model():
-            # TODO: test that this works
+        def extract_model_and_make_prediction():
             import hmac, hashlib, json, pickle
 
             if not s3_hook.check_for_key(MODEL_INFO_JSON_KEY, MINIO_BUCKET_NAME):
@@ -338,15 +337,13 @@ def air_quality_live():
             if not s3_hook.check_for_key(MODEL_KEY, MINIO_BUCKET_NAME):
                 raise FileNotFoundError(f"Could not find the chosen model: {MODEL_KEY}")
             
-            model_json_s3_object = s3_hook.get_key(MODEL_INFO_JSON_KEY, MINIO_BUCKET_NAME)
+            json_metadata_dict = json.loads(s3_hook.get_key(MODEL_INFO_JSON_KEY, MINIO_BUCKET_NAME).get()["Body"].read())
             model_s3_object = s3_hook.get_key(MODEL_KEY, MINIO_BUCKET_NAME)
-
-            model_name = MODEL_KEY.rsplit("/", 1)[0]
-            json_metadata_dict = json.loads(model_json_s3_object.get()['Body'])
             model_obj = model_s3_object.get()['Body'].read()
-            received_signature = json_metadata_dict.get(model_name, {}).get("signature", "")
-            logger.info(f"received_signature: {received_signature}") # TODO: delete. this is just for testing
 
+            model_name = MODEL_KEY.rsplit("/", 1)[-1]
+
+            received_signature = json_metadata_dict.get(model_name, {}).get("signature", "")
             expected_signature = hmac.new(SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
             if not hmac.compare_digest(received_signature, expected_signature):
                 raise ValueError(f"Signature mismatch on {MODEL_KEY}")
@@ -354,16 +351,14 @@ def air_quality_live():
             model = pickle.loads(model_obj)
 
             logger.info(f"model object type: {type(model)}")
-
-        @task
-        def make_and_save_predictions():
+            # TODO:
             # get the data from the view 
             # pass it to transform_feature_rows_for_model_readiness()
             # make predictions using model
             # use these values to recreate online table
             pass
 
-        create_live_data_view_if_not_exists >> extract_and_verify_model() >> make_and_save_predictions()
+        create_live_data_view_if_not_exists >> extract_model_and_make_prediction()
 
         pass
 
