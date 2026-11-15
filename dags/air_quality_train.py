@@ -62,7 +62,7 @@ default_args = {
 def train_and_save_model():
     from lightgbm import LGBMClassifier
     from sklearn.metrics import accuracy_score
-    import pandas as pd
+    from air_quality_helpers import transform_feature_rows_for_model_readiness
 
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
     clickhouse_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
@@ -81,21 +81,10 @@ def train_and_save_model():
     def train_model():
         loss_function_name = 'multi_logloss'
 
-        # fetch data
+        # fetch and prepare data
         air_pollution_features_df = clickhouse_client.query_df("SELECT * FROM weather_features.feature_air_pollution order by time_of_measurement")
-        
-        ## data wrangling:
         air_pollution_features_df = air_pollution_features_df.dropna()
-        # Appy one-hot encoding per city and season. remove air_pollution_features_row_id. remove time of measurement. 
-        air_pollution_features_df = pd.get_dummies(air_pollution_features_df, columns=['lat_and_long_encoding_id'], dtype=int)
-        air_pollution_features_df = pd.get_dummies(air_pollution_features_df, columns=['season'], dtype=int)
-        air_pollution_features_df=air_pollution_features_df.drop(columns="air_pollution_features_row_id")
-        air_pollution_features_df=air_pollution_features_df.drop(columns="time_of_measurement_utc")
-        air_pollution_features_df=air_pollution_features_df.drop(columns="time_of_measurement") # relevant time features like day and hour and weekend or not are encoded already.
-
-        ## get training and test features and targets
-        Y=air_pollution_features_df["aqi_6_hour_ahead"]
-        X=air_pollution_features_df.drop(columns="aqi_6_hour_ahead")
+        X,Y = transform_feature_rows_for_model_readiness(air_pollution_features_df)
 
         # Slice chronologically using .iloc; 80-20 split
         split_idx = int(len(air_pollution_features_df) * 0.8)

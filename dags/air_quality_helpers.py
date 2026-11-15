@@ -4,6 +4,7 @@ logger = logging.getLogger(__name__)
 from timezonefinder import TimezoneFinder
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+import pandas as pd
 
 # Initialize once and reuse across requests for better performance
 tf = TimezoneFinder()
@@ -87,3 +88,25 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
             output_rows.append(output_row)
             row_count += 1
     logger.info(f"{row_count} queued for insertion")
+
+def transform_feature_rows_for_model_readiness(air_pollution_features_df: pd.DataFrame) -> tuple:
+    '''
+    applies one hot encoding to lat_and_long_encoding_id and season
+    drops air_pollution_features_row_id, time_of_measurement_utc, time_of_measurement
+
+    returns (X, Y):
+        X: pd.DataFrame of X features
+        Y: pd.Series of y features
+    '''
+    # Appy one-hot encoding per city and season. remove air_pollution_features_row_id. remove time of measurement. 
+    air_pollution_features_df = pd.get_dummies(air_pollution_features_df, columns=['lat_and_long_encoding_id'], dtype=int)
+    air_pollution_features_df = pd.get_dummies(air_pollution_features_df, columns=['season'], dtype=int)
+    air_pollution_features_df=air_pollution_features_df.drop(columns="air_pollution_features_row_id")
+    air_pollution_features_df=air_pollution_features_df.drop(columns="time_of_measurement_utc")
+    air_pollution_features_df=air_pollution_features_df.drop(columns="time_of_measurement") # relevant time feature
+
+    ## get training and test features and targets
+    Y=air_pollution_features_df["aqi_6_hour_ahead"]
+    X=air_pollution_features_df.drop(columns="aqi_6_hour_ahead")
+
+    return X, Y

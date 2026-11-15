@@ -1,5 +1,5 @@
 """
-# Air Quality Historical
+# Air Quality Live
 
 ## Overview
 Fetches realtime air pollution data from the OpenWeather Air Pollution History API for each city in the `city_coordinates` table, covering the entirety of the previous calendar month. Parsed rows are bulk-inserted into `air_quality_datasets.raw` in ClickHouse, where incremental dbt models downstream transform them into features.
@@ -84,6 +84,7 @@ AIR_QUAILTY_DBT_PROJECT_PATH=f"{INCLUDE_PATH}/dbt/air_quality_feature_engineerin
 EMAIL_ON_FAILURE_LIST = [os.getenv("MY_EMAIL")]
 
 SOURCE_SCHEMA_NAME = 'weather_raw'
+FEATURES_SCHEMA_NAME = 'weather_features'
 AIR_QUALITY_RAW_TABLE_NAME = 'air_pollution'
 CITY_COORDINATES_TABLE_NAME = 'city_coordinates'
 
@@ -103,7 +104,7 @@ profile_config = ProfileConfig(
     profile_mapping=ClickhouseUserPasswordProfileMapping( 
          conn_id=CLICKHOUSE_CONN, 
          profile_args={
-            "schema": "weather_features",
+            "schema": FEATURES_SCHEMA_NAME,
             "port": 9000,
             "driver": "native" 
         },
@@ -307,10 +308,23 @@ def air_quality_live():
         folder_dir="/dbt_docs"
     )
 
-    @task
+    @task_group
     def refresh_online_table():
-        # TODO: first create a view on feature table which gets rows within the past 6:30 minutes with null target
-
+        create_live_data_view_if_not_exists = SQLExecuteQueryOperator(
+            task_id='create_live_data_view_if_not_exists',
+            sql = f"""create view {FEATURES_SCHEMA_NAME}.feature_air_pollution_latest
+            as
+            SELECT 
+                *
+            FROM {FEATURES_SCHEMA_NAME}.feature_air_pollution
+            where created_at >= (now() - (INTERVAL 6 HOUR + INTERVAL 30 MINUTE))
+            and aqi_6_hour_ahead is null
+            COMMENT 'Gets the most recent rows for which the target column of aqi_6_hours_ahead is not known from {FEATURES_SCHEMA_NAME}.feature_air_pollution';
+            """,
+            conn_id=CLICKHOUSE_CONN,
+        )
+        # TODO:
+        
         # extract the logic that wrangles data for entry into the model from air_quality_train into air_quality_helpers and test the old DAG still works with import
 
         # THEN load the model should be loaded from minio, verify hmac. if hmac verification fails, raise error
