@@ -44,7 +44,6 @@ Also required (as Airflow Connections):
 """
 import logging
 import requests
-from decimal import Decimal
 from typing import Any
 import os
 from dotenv import load_dotenv
@@ -95,7 +94,7 @@ OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY")
 SECRET_SIGNING_KEY = os.getenv("SECRET_SIGNING_KEY")
 
 # TODO: think of an automatic way of getting the most recently trained and accurate model that does not involve passing in the model key
-MODEL_KEY = ""
+MODEL_KEY = "air-quality/air_quality_models/train-2026-11-15/model.pkl"
 
 
 profile_config = ProfileConfig(
@@ -310,6 +309,10 @@ def air_quality_live():
 
     @task_group
     def refresh_online_table():
+        model = None
+        MODEL_INFO_JSON_KEY = MODEL_KEY.rsplit("/", 1)[0] + "/" + "model_info.json"
+        s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
+
         create_live_data_view_if_not_exists = SQLExecuteQueryOperator(
             task_id='create_live_data_view_if_not_exists',
             sql = f"""create view {FEATURES_SCHEMA_NAME}.feature_air_pollution_latest
@@ -323,15 +326,44 @@ def air_quality_live():
             """,
             conn_id=CLICKHOUSE_CONN,
         )
-        # TODO:
-        
-        # extract the logic that wrangles data for entry into the model from air_quality_train into air_quality_helpers and test the old DAG still works with import
 
-        # THEN load the model should be loaded from minio, verify hmac. if hmac verification fails, raise error
-        # and used to predict features in the serving layer
-        # # signature = hmac.new(SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
+        @task
+        def extract_and_verify_model():
+            # TODO: test that this works
+            import hmac, hashlib, json, pickle
 
-        # make predictions, then replace an online table made with merge tree with the predicted AQI
+            if not s3_hook.check_for_key(MODEL_INFO_JSON_KEY, MINIO_BUCKET_NAME):
+                raise FileNotFoundError(f"Could not find the json metadata file: {MODEL_INFO_JSON_KEY}")
+            
+            if not s3_hook.check_for_key(MODEL_KEY, MINIO_BUCKET_NAME):
+                raise FileNotFoundError(f"Could not find the chosen model: {MODEL_KEY}")
+            
+            model_json_s3_object = s3_hook.get_key(MODEL_INFO_JSON_KEY, MINIO_BUCKET_NAME)
+            model_s3_object = s3_hook.get_key(MODEL_KEY, MINIO_BUCKET_NAME)
+
+            model_name = MODEL_KEY.rsplit("/", 1)[0]
+            json_metadata_dict = json.loads(model_json_s3_object.get()['Body'])
+            model_obj = model_s3_object.get()['Body'].read()
+            received_signature = json_metadata_dict.get(model_name, {}).get("signature", "")
+            logger.info(f"received_signature: {received_signature}") # TODO: delete. this is just for testing
+
+            expected_signature = hmac.new(SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(received_signature, expected_signature):
+                raise ValueError(f"Signature mismatch on {MODEL_KEY}")
+            
+            model = pickle.loads(model_obj)
+
+            logger.info(f"model object type: {type(model)}")
+
+        @task
+        def make_and_save_predictions():
+            # get the data from the view 
+            # pass it to transform_feature_rows_for_model_readiness()
+            # make predictions using model
+            # use these values to recreate online table
+            pass
+
+        create_live_data_view_if_not_exists >> extract_and_verify_model() >> make_and_save_predictions()
 
         pass
 

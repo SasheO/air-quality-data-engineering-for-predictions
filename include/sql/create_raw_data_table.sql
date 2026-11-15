@@ -10,8 +10,8 @@ create table if not exists {{ params.schema_name }}.{{ params.air_quality_table_
     pm10_concentration Nullable(Float32), 
     nh3_concentration Nullable(Float32), 
     aqi Nullable(UInt8), 
-    time_of_measurement DateTime,
-    time_of_measurement_utc DateTime,
+    time_of_measurement DateTime COMMENT 'The time local to the longitude and latitude coordinate when the measurement was taken',
+    time_of_measurement_utc DateTime COMMENT 'The UTC time when the measurement was taken',
     created_at DateTime('UTC') DEFAULT now(),
     inserted_by Nullable(String),
     row_content_hash String
@@ -31,8 +31,8 @@ create or replace table {{ params.schema_name }}.{{ params.air_quality_staging_t
     pm10_concentration Nullable(Float32), 
     nh3_concentration Nullable(Float32), 
     aqi Nullable(UInt8), 
-    time_of_measurement DateTime,
-    time_of_measurement_utc DateTime,
+    time_of_measurement DateTime COMMENT 'The time local to the longitude and latitude coordinate when the measurement was taken',
+    time_of_measurement_utc DateTime COMMENT 'The UTC time when the measurement was taken',
     created_at DateTime('UTC') DEFAULT now(),
     inserted_by Nullable(String),
     row_content_hash String
