@@ -12,7 +12,7 @@ create table if not exists {{ params.schema_name }}.{{ params.air_quality_table_
     aqi Nullable(UInt8), 
     time_of_measurement DateTime,
     time_of_measurement_utc DateTime,
-    created_at DateTime DEFAULT now(),
+    created_at DateTime('UTC') DEFAULT now(),
     inserted_by Nullable(String),
     row_content_hash String
 )
@@ -33,7 +33,7 @@ create or replace table {{ params.schema_name }}.{{ params.air_quality_staging_t
     aqi Nullable(UInt8), 
     time_of_measurement DateTime,
     time_of_measurement_utc DateTime,
-    created_at DateTime DEFAULT now(),
+    created_at DateTime('UTC') DEFAULT now(),
     inserted_by Nullable(String),
     row_content_hash String
 )
@@ -45,7 +45,7 @@ create table if not exists {{ params.schema_name }}.{{ params.city_coordinates_t
     country FixedString(2), 
     longitude_coordinate Decimal(10, 7), 
     latitude_coordinate Decimal(10, 7),
-    created_at DateTime DEFAULT now()
+    created_at DateTime('UTC') DEFAULT now()
 )
 ENGINE = MergeTree()
 ORDER BY (longitude_coordinate, latitude_coordinate);

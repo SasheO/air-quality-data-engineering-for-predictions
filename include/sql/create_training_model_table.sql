@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS monitoring.ml_model_stats
     key              String                   COMMENT 'Unique storage key (s3 path, registry id, etc.)',
     loss_value       Float64                  COMMENT 'Primary loss/metric value',
     loss_function    LowCardinality(String)   COMMENT 'e.g. mse, logloss, mae',
-    entry_timestamp  DateTime64(3, 'UTC')     COMMENT 'When this row was recorded (ms precision)',
+    entry_timestamp  DateTime('UTC') DEFAULT now()     COMMENT 'When this row was recorded (ms precision)',
     details_json     String                   COMMENT 'Raw JSON blob (use JSONExtract* to query)',
     first_entry      Bool DEFAULT false                     COMMENT 'true only for the initial training entry per key'
 )
