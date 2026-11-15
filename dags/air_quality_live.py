@@ -1,11 +1,3 @@
-CLICKHOUSE_CONN = "clickhouse_conn"
-MINIO_CONN = "minio_conn"
-
-'''
-TODO: make this pipeline run daily
-also make pipeline idempotent with the use of a process log and expand params
-'''
-
 import logging
 import requests
 from decimal import Decimal
@@ -15,8 +7,6 @@ from dotenv import load_dotenv
 from datetime import (
     datetime, 
     timedelta,
-    timezone,
-    date,
     )
 
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
@@ -35,6 +25,8 @@ from cosmos import DbtTaskGroup, ProjectConfig, ProfileConfig, RenderConfig
 from cosmos.constants import TestBehavior
 from cosmos.operators import DbtDocsS3Operator
 
+from air_quality_helpers import build_rows
+
 logger = logging.getLogger(__name__)
 load_dotenv()
 
@@ -52,6 +44,9 @@ MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "air-quality")
 MINIO_CONN_ID="minio_conn"
 
 OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY") 
+
+# TODO: think of an automatic way of getting the most recently trained and accurate model that does not involve passing in the model key
+MODEL_KEY = ""
 
 RAW_TABLE_COLUMNS = [
     "longitude_coordinate",
@@ -144,7 +139,8 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
             aqi = 0 # 0 is an error row because aqi goes from 1-5
 
         if comp:
-            output_row = [lon,
+            output_row = [
+                lon,
                 lat,
                 comp.get("co"),
                 comp.get("no"),
@@ -257,7 +253,10 @@ def air_quality_live():
 
         @task
         def ingest_air_pollution_data(_city_coordinates: list[dict[str, Any]]):
-            pass
+            context = get_current_context()
+            dag_run_id = context["dag_run"].run_id
+
+            insert_rows_with_city_data = []
             # TODO: this needs to get current data for all cities
 
         write_air_pollution_data = SQLExecuteQueryOperator(
