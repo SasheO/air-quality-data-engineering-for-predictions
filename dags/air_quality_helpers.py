@@ -9,12 +9,15 @@ from zoneinfo import ZoneInfo
 tf = TimezoneFinder()
 
 def utc_to_local(utc_dt: datetime, lat: float, lng: float) -> datetime:
-    # 1. Look up the IANA time zone string from coordinates
+    '''
+    converts a utc date time to a local time based on a given latitude and longitude coordinates
+    '''
+    # Look up the IANA time zone string from coordinates
     tz_name = tf.timezone_at(lat=lat, lng=lng)
     if not tz_name:
         raise ValueError("Time zone could not be determined for these coordinates.")
     
-    # 2. Ensure the input datetime is UTC-aware and convert it
+    # convert time to local timezone
     if utc_dt.tzinfo is None:
         utc_dt = utc_dt.replace(tzinfo=timezone.utc)
     return utc_dt.astimezone(ZoneInfo(tz_name))
@@ -41,6 +44,8 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
             aqi = 0 # 0 is an error row because aqi goes from 1-5
 
         if comp:
+            utc_time = datetime.fromtimestamp(entry["dt"], tz=timezone.utc)
+            local_time = utc_to_local(utc_time, lat, lon)
             output_row = [lon,
                 lat,
                 comp.get("co"),
@@ -52,7 +57,7 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
                 comp.get("pm10"),
                 comp.get("nh3"),
                 aqi,
-                entry["dt"],
+                local_time,
                 ]
             row_hash = hashlib.md5(json.dumps(output_row).encode('utf-8')).hexdigest()
             output_row.append(dag_run_id)
