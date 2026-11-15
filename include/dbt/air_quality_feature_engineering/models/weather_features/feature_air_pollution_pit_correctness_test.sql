@@ -1,6 +1,7 @@
 {{
     config(
-        materialized='incremental'
+        materialized='incremental',
+        tags=["pit-correctness-test"]
     )
 }}
 

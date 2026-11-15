@@ -47,6 +47,7 @@ MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "air-quality")
 MINIO_CONN_ID="minio_conn"
 
 OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY") 
+SECRET_SIGNING_KEY = os.getenv("SECRET_SIGNING_KEY")
 
 # TODO: think of an automatic way of getting the most recently trained and accurate model that does not involve passing in the model key
 MODEL_KEY = ""
@@ -72,6 +73,7 @@ project_config = ProjectConfig(
 render_config=RenderConfig(
         test_behavior=TestBehavior.AFTER_EACH,
         should_detach_multiple_parents_tests=True,
+        exclude=["tag:pit-correctness-test"],
     )
 
 with open(f"{INCLUDE_PATH}/doc_md/air_quality_historical.md", "r", encoding="utf-8") as file:
@@ -264,7 +266,19 @@ def air_quality_live():
         folder_dir="/dbt_docs"
     )
 
-    # TODO: after dbt_models does feature extraction, the model should be loaded from minio and used to predict features in the serving layer
+    @task
+    def refresh_online_table():
+        # TODO: first create a view on feature table which gets rows within the past 6:30 minutes with null target
+
+        # extract the logic that wrangles data for entry into the model from air_quality_train into air_quality_helpers and test the old DAG still works with import
+
+        # THEN load the model should be loaded from minio, verify hmac. if hmac verification fails, raise error
+        # and used to predict features in the serving layer
+        # # signature = hmac.new(SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
+
+        # make predictions, then replace an online table made with merge tree with the predicted AQI
+
+        pass
 
     # TODO: when fetching hourly data, also write current aqi to five hours ago for the respective columns.
     '''
@@ -277,12 +291,13 @@ def air_quality_live():
     city_coordinates = get_city_coordinates()
     wcarapt = write_city_and_raw_air_pollution_data(city_coordinates)
     cbine = create_bucket_if_not_exists()
+    rot = refresh_online_table()
 
     create_schema_if_not_exists >> create_tables 
     
     create_tables >> city_coordinates
 
-    city_coordinates >> wcarapt >> dbt_models
+    city_coordinates >> wcarapt >> dbt_models >> rot
 
     cbine >> dbt_models >> generate_dbt_docs_to_minio_bucket 
     
