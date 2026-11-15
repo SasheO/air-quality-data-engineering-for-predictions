@@ -321,6 +321,16 @@ def air_quality_live():
         folder_dir="/dbt_docs"
     )
 
+    # TODO: after dbt_models does feature extraction, the model should be loaded from minio and used to predict features in the serving layer
+
+    # TODO: when fetching hourly data, also write current aqi to five hours ago for the respective columns.
+    '''
+    for writing target to five hours ago, first get all current city rows from weather_features.city_coordinates snapshot to get their respective lat_and_long_encoding_id
+    
+    map cities to their lat and long encoding id in python.
+    use a dynamic task to expand the params and run a lightweight update for each of the cities/lat_and_long_encoding_ids
+    '''
+
     city_coordinates = get_city_coordinates()
     wcarapt = write_city_and_raw_air_pollution_data(city_coordinates)
     cbine = create_bucket_if_not_exists()
@@ -333,7 +343,5 @@ def air_quality_live():
 
     cbine >> dbt_models >> generate_dbt_docs_to_minio_bucket 
     
-    # TODO: after dbt_models does feature extraction, the model should be loaded from minio and used to predict features in the serving layer
-    # TODO: when fetching hourly data, also write current aqi to five hours ago for the respective columns.
-
+    
 air_quality_live_dag = air_quality_live()

@@ -6,3 +6,4 @@ dbt-clickhouse==1.9.3
 astronomer-cosmos==1.15.0
 pandas==3.0.1
 lightgbm==4.7.0
+timezonefinder==9.2.0

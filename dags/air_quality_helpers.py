@@ -1,6 +1,24 @@
 import logging
 logger = logging.getLogger(__name__)
 
+from timezonefinder import TimezoneFinder
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+# Initialize once and reuse across requests for better performance
+tf = TimezoneFinder()
+
+def utc_to_local(utc_dt: datetime, lat: float, lng: float) -> datetime:
+    # 1. Look up the IANA time zone string from coordinates
+    tz_name = tf.timezone_at(lat=lat, lng=lng)
+    if not tz_name:
+        raise ValueError("Time zone could not be determined for these coordinates.")
+    
+    # 2. Ensure the input datetime is UTC-aware and convert it
+    if utc_dt.tzinfo is None:
+        utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+    return utc_dt.astimezone(ZoneInfo(tz_name))
+
 def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output_rows: list[tuple]) -> None:
     '''
     modifies output_rows in place to contain insert ready rows with data from city_dict and json payload
