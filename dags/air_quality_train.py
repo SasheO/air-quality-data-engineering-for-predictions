@@ -21,7 +21,7 @@ EMAIL_ON_FAILURE_LIST = [os.getenv("MY_EMAIL")]
 INCLUDE_PATH = '/opt/airflow/include'
 CLICKHOUSE_CONN = "clickhouse_conn"
 SECRET_SIGNING_KEY = os.getenv("SECRET_SIGNING_KEY")
-MODEL_CLASS="air_quality" # TODO: use this when writing metadata to clickhouse table on model training. The model class should be this, in case other models are trained elsewhere (to differentiate)
+MODEL_CLASS="air_quality"
 
 with open(f"{INCLUDE_PATH}/doc_md/air_quality_train.md", "r", encoding="utf-8") as file:
     DOC_MD = file.read() 
@@ -50,6 +50,8 @@ def train_and_save_model():
 
     @task()
     def train_model():
+        loss_function_name = 'multi_logloss'
+
         # fetch data
         air_pollution_features_df = clickhouse_client.query_df("SELECT * FROM weather_features.feature_air_pollution order by time_of_measurement")
         
@@ -78,7 +80,7 @@ def train_and_save_model():
         acs=accuracy_score(Y_test,Y_pred)
         logger.info(f"model accuracy pct: {acs}%")
 
-        train_error_history = model.evals_result_['eval']['multi_logloss']
+        train_error_history = model.evals_result_['eval'][loss_function_name]
         final_train_error = train_error_history[-1]
         logger.info(f"Final Training Error: {final_train_error}")
 
@@ -98,6 +100,7 @@ def train_and_save_model():
             "y_test_mean": Y_test.mean(),
             "y_test_var": Y_test.var(),
             "model_accuraccy_pct_score": acs,
+            "loss_function": loss_function_name
         }
 
         return model_stats
@@ -164,26 +167,50 @@ def train_and_save_model():
             replace=True
         )
 
+        model_info = {
+            "model_storage_key": model_storage_key
+        }
+
+        return model_info
+
     @task
-    def log_model_stats_to_clickhouse(model_stats: dict):
-        model_table_fields = [
-            "model_name", #      LowCardinality(String)   COMMENT 'Human-readable model name',
-            "model_type", #      LowCardinality(String)   COMMENT 'Algorithm family: xgboost, regressor, etc.',
-            "model_class", #      LowCardinality(String)   COMMENT 'What the model is used for e.g air_quality for air quality prediction models,',
-            "key", #             String                   COMMENT 'Unique storage key (s3 path, registry id, etc.)',
-            "loss_value", #       Float64                  COMMENT 'Primary loss/metric value',
-            "loss_function", #   LowCardinality(String)   COMMENT 'e.g. mse, logloss, mae',
-            "entry_timestamp", #  DateTime64(3, 'UTC')     COMMENT 'When this row was recorded (ms precision)',
-            "details_json", #     String                   COMMENT 'Raw JSON blob (use JSONExtract* to query)',
-            "first_entry", #      Bool DEFAULT false                     COMMENT 'true only for the initial training entry per key'
+    def log_model_stats_to_clickhouse(model_stats: dict, model_info: dict):
+        ch_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
+        model_table_columns = [
+            "model_name",
+            "model_type", # Algorithm family e.g. xgboost, regressor,
+            "model_class", # What the model is used for e.g air_quality for air quality prediction models
+            "key", # Unique storage key e.g. s3 path, registry id, etc.
+            "loss_value",
+            "loss_function",
+            "entry_timestamp",
+            "details_json",
+            "first_entry", # Bool, true only for the initial training entry per key
             ]
-        pass        
+
+        model_stat_row = [
+            model_info.get("model_storage_key"),
+            "lightgbm.LGBMClassifier",
+            MODEL_CLASS,
+            model_info.get("model_storage_key"),
+            model_stats.get("final_train_error"),
+            model_stats.get("loss_function"),
+            datetime.now(), # this is currently stored as date time of server. TODO: store this as a given time zone for consistency e.g. UTC always
+            json.dumps(model_stats),
+            True
+        ]
+        
+        ch_hook.bulk_insert_rows(
+                table="monitoring.ml_model_stats", 
+                rows=[model_stat_row], 
+                column_names=model_table_columns
+            )
+
+        logger.info(f"saved: {dict(zip(model_table_columns, model_stat_row))}")
 
     model_stats = train_model() 
-    psm = pickle_and_save_model_to_bucket(model_stats)
-    lms = log_model_stats_to_clickhouse(model_stats)
-
-    psm >> lms
+    model_info = pickle_and_save_model_to_bucket(model_stats)
+    log_model_stats_to_clickhouse(model_stats, model_info)
 
 @dag(
     dag_id="air_quality_train",
@@ -194,7 +221,7 @@ def train_and_save_model():
     catchup=True,
     doc_md=DOC_MD,
     max_active_runs=1,
-    tags=["air_quality", "model_training"],  # Add your tags here
+    tags=["air_quality", "model_training"], 
 )
 def air_quality_train():
     create_tables = SQLExecuteQueryOperator(
