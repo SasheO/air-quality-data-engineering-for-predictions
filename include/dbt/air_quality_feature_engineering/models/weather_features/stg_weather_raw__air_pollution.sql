@@ -12,7 +12,8 @@ with air_pollution_raw as
         pm10_concentration,
         nh3_concentration,
         aqi,
-        time_of_measurement
+        time_of_measurement,
+        time_of_measurement_utc
     from {{ source('weather_raw', 'air_pollution') }}
 ),
 city_coordinates as (
@@ -42,6 +43,7 @@ select
     nh3_concentration,
     aqi,
     time_of_measurement,
+    time_of_measurement_utc,
     city_coordinates_scd_id
 from air_pollution_raw
 join city_coordinates

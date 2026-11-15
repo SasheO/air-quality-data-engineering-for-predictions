@@ -69,6 +69,7 @@ def train_and_save_model():
         air_pollution_features_df = pd.get_dummies(air_pollution_features_df, columns=['lat_and_long_encoding_id'], dtype=int)
         air_pollution_features_df = pd.get_dummies(air_pollution_features_df, columns=['season'], dtype=int)
         air_pollution_features_df=air_pollution_features_df.drop(columns="air_pollution_features_row_id")
+        air_pollution_features_df=air_pollution_features_df.drop(columns="time_of_measurement_utc")
         air_pollution_features_df=air_pollution_features_df.drop(columns="time_of_measurement") # relevant time features like day and hour and weekend or not are encoded already.
 
         ## get training and test features and targets
@@ -235,14 +236,14 @@ def train_and_save_model():
     tags=["air_quality", "model_training"], 
 )
 def air_quality_train():
-    create_tables = SQLExecuteQueryOperator(
-        task_id='create_tables_if_not_exists',
+    create_schema_and_tables = SQLExecuteQueryOperator(
+        task_id='setup_schema_and_tables',
         sql = f"sql/create_training_model_table.sql",
         split_statements=True,
         conn_id=CLICKHOUSE_CONN,
     )   
     tr = train_and_save_model()
 
-    create_tables >> tr
+    create_schema_and_tables >> tr
 
 air_quality_train_dag = air_quality_train()

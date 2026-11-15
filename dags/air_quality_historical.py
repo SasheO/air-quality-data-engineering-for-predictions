@@ -25,7 +25,10 @@ from cosmos import DbtTaskGroup, ProjectConfig, ProfileConfig, RenderConfig
 from cosmos.constants import TestBehavior
 from cosmos.operators import DbtDocsS3Operator
 
-from air_quality_helpers import build_rows
+from air_quality_helpers import (
+    build_rows,
+    RAW_TABLE_COLUMNS,
+    )
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -46,23 +49,6 @@ OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY")
 
 EMAIL_ON_FAILURE_LIST = [os.getenv("MY_EMAIL")]
 
-RAW_TABLE_COLUMNS = [
-    "longitude_coordinate",
-    "latitude_coordinate",
-    "co_concentration",
-    "no_concentration",
-    "no2_concentration",
-    "o3_concentration",
-    "so2_concentration",
-    "pm2_5_concentration",
-    "pm10_concentration",
-    "nh3_concentration",
-    "aqi",
-    "time_of_measurement",
-    "inserted_by",
-    # created_at not included
-    "row_content_hash",
-]
 
 profile_config = ProfileConfig(
     profile_name="air_quality_dbt_profile",

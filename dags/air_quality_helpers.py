@@ -8,9 +8,30 @@ from zoneinfo import ZoneInfo
 # Initialize once and reuse across requests for better performance
 tf = TimezoneFinder()
 
-def utc_to_local(utc_dt: datetime, lat: float, lng: float) -> datetime:
+RAW_TABLE_COLUMNS = [
+    "longitude_coordinate",
+    "latitude_coordinate",
+    "co_concentration",
+    "no_concentration",
+    "no2_concentration",
+    "o3_concentration",
+    "so2_concentration",
+    "pm2_5_concentration",
+    "pm10_concentration",
+    "nh3_concentration",
+    "aqi",
+    "time_of_measurement",
+    "time_of_measurement_utc",
+    "inserted_by",
+    # created_at not included
+    "row_content_hash",
+]
+
+def utc_to_local(utc_dt: datetime, lat: float, lng: float) -> int:
     '''
     converts a utc date time to a local time based on a given latitude and longitude coordinates
+    
+    returns a timestamp which when converted naively will give the local timezone (since the)
     '''
     # Look up the IANA time zone string from coordinates
     tz_name = tf.timezone_at(lat=lat, lng=lng)
@@ -57,7 +78,8 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
                 comp.get("pm10"),
                 comp.get("nh3"),
                 aqi,
-                local_time,
+                int(local_time.replace(tzinfo=None).timestamp()), # unix timestamp format but not in UTC i.e. when converted timezone unawre, it will return the right local time
+                entry["dt"], # utc time as a unix time stamp
                 ]
             row_hash = hashlib.md5(json.dumps(output_row).encode('utf-8')).hexdigest()
             output_row.append(dag_run_id)

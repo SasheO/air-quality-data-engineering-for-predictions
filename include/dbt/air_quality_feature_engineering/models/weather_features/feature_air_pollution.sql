@@ -10,7 +10,8 @@ select
     {{ dbt_utils.generate_surrogate_key(['time_of_measurement', 'city_coordinates_scd_id']) }} as air_pollution_features_row_id,
 
     time_of_measurement,
-    lat_and_long_encoding_id, -- TODO: convert this to hot enconding of cities
+    time_of_measurement_utc,
+    lat_and_long_encoding_id, 
     co_concentration,
     no_concentration,
     no2_concentration,
@@ -158,9 +159,7 @@ from {{ ref('stg_weather_raw__air_pollution') }}
   -- this filter will only be applied on an incremental run
   -- (uses > to include records whose timestamp occurred since the last run of this model)
   -- however, a greater than means retrospective backfills will be missed. this is something to consider 
-
-  -- TODO: this need updating. This needs to get the max time of measurement per latitude_and_longitude_id because it uses local time now
-where time_of_measurement > (select coalesce(max(time_of_measurement),'1970-01-01') from {{ this }} )
+where time_of_measurement > (select coalesce(max(time_of_measurement_utc),'1970-01-01') from {{ this }} )
 
 {% endif %}
 
