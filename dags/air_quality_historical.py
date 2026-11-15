@@ -263,7 +263,6 @@ def air_quality_historical():
     def create_bucket_if_not_exists():
         hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
         
-        # Check if the bucket already exists
         if not hook.check_for_bucket(MINIO_BUCKET_NAME):
             hook.create_bucket(bucket_name=MINIO_BUCKET_NAME)
             logger.info(f"Bucket {MINIO_BUCKET_NAME} created successfully.")

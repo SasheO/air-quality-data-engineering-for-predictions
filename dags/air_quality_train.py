@@ -49,6 +49,14 @@ def train_and_save_model():
     model=LGBMClassifier()
 
     @task()
+    def create_bucket_if_not_exists():
+        if not s3_hook.check_for_bucket(MINIO_BUCKET_NAME):
+            s3_hook.create_bucket(bucket_name=MINIO_BUCKET_NAME)
+            logger.info(f"Bucket {MINIO_BUCKET_NAME} created successfully.")
+        else:
+            logger.info(f"Bucket {MINIO_BUCKET_NAME} already exists. Skipping creation.")
+    
+    @task()
     def train_model():
         loss_function_name = 'multi_logloss'
 
@@ -209,8 +217,11 @@ def train_and_save_model():
         logger.info(f"saved: {dict(zip(model_table_columns, model_stat_row))}")
 
     model_stats = train_model() 
+    cb = create_bucket_if_not_exists()
     model_info = pickle_and_save_model_to_bucket(model_stats)
     log_model_stats_to_clickhouse(model_stats, model_info)
+
+    cb >> model_info
 
 @dag(
     dag_id="air_quality_train",
@@ -218,7 +229,7 @@ def train_and_save_model():
     schedule=None, # only when triggered
     template_searchpath=[INCLUDE_PATH],
     default_args=default_args,
-    catchup=True,
+    catchup=False,
     doc_md=DOC_MD,
     max_active_runs=1,
     tags=["air_quality", "model_training"], 

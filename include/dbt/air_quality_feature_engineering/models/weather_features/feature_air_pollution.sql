@@ -156,8 +156,8 @@ from {{ ref('stg_weather_raw__air_pollution') }}
 {% if is_incremental() %}
 
   -- this filter will only be applied on an incremental run
-  -- (uses >= to include records whose timestamp occurred since the last run of this model)
-  -- (If event_time is NULL or the table is truncated, the condition will always be true and load all records)
+  -- (uses > to include records whose timestamp occurred since the last run of this model)
+  -- however, a greater than means retrospective backfills will be missed. this is something to consider 
 where time_of_measurement > (select coalesce(max(time_of_measurement),'1970-01-01') from {{ this }} )
 
 {% endif %}

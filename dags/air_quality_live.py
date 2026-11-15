@@ -163,10 +163,10 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
 @dag(
     dag_id="air_quality_live",
     start_date=datetime(2026, 11, 1),
-    schedule="5 * * * *", # get data for this hour at **:05
+    schedule="0 * * * *", # get data for this hour at **:00
     template_searchpath=[INCLUDE_PATH],
     default_args=default_args,
-    catchup=True,
+    catchup=False,
     doc_md=DOC_MD,
     max_active_runs=1,
     tags=["air_quality", "model_serving"],
@@ -255,9 +255,35 @@ def air_quality_live():
         def ingest_air_pollution_data(_city_coordinates: list[dict[str, Any]]):
             context = get_current_context()
             dag_run_id = context["dag_run"].run_id
-
+            
             insert_rows_with_city_data = []
-            # TODO: this needs to get current data for all cities
+
+            for city_dict in _city_coordinates:
+                logger.info(f"Fetching current air pollution data for {city_dict.get('city')}, {city_dict.get('country')}")
+                lat = city_dict.get("latitude_coordinate")
+                lon = city_dict.get("longitude_coordinate")
+                resp = requests.get(
+                        "http://api.openweathermap.org/data/2.5/air_pollution",
+                        params={
+                            "lat": lat,
+                            "lon": lon,
+                            "appid": OPENWEATHER_API_SECRET_KEY,
+                        },
+                        timeout=30,
+                    )
+                resp.raise_for_status()
+                payload = resp.json()
+
+                build_rows(city_dict, payload, dag_run_id, insert_rows_with_city_data)
+                
+            if not insert_rows_with_city_data:
+                logger.warning("No rows fetched — skipping insert")
+            else:
+                ch_hook.bulk_insert_rows(
+                    table=f"{SOURCE_SCHEMA_NAME}.{default_args["params"]["air_quality_staging_table_name"]}", 
+                    rows=insert_rows_with_city_data, 
+                    column_names=RAW_TABLE_COLUMNS
+                )
 
         write_air_pollution_data = SQLExecuteQueryOperator(
         task_id='write_air_pollution_data',
@@ -273,7 +299,6 @@ def air_quality_live():
     def create_bucket_if_not_exists():
         hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
         
-        # Check if the bucket already exists
         if not hook.check_for_bucket(MINIO_BUCKET_NAME):
             hook.create_bucket(bucket_name=MINIO_BUCKET_NAME)
             logger.info(f"Bucket {MINIO_BUCKET_NAME} created successfully.")
@@ -309,5 +334,6 @@ def air_quality_live():
     cbine >> dbt_models >> generate_dbt_docs_to_minio_bucket 
     
     # TODO: after dbt_models does feature extraction, the model should be loaded from minio and used to predict features in the serving layer
+    # TODO: when fetching hourly data, also write current aqi to five hours ago for the respective columns.
 
 air_quality_live_dag = air_quality_live()
