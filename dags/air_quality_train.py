@@ -10,6 +10,7 @@ from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from datetime import datetime, timedelta, date
 from dotenv import load_dotenv
 from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,14 @@ def train_and_save_model():
     tags=["air_quality", "model_training"],  # Add your tags here
 )
 def air_quality_train():
+    create_tables = SQLExecuteQueryOperator(
+        task_id='create_tables_if_not_exists',
+        sql = f"sql/create_training_model_table.sql",
+        split_statements=True,
+        conn_id=CLICKHOUSE_CONN,
+    )   
     tr = train_and_save_model()
+
+    create_tables >> tr
 
 air_quality_train_dag = air_quality_train()
