@@ -71,10 +71,10 @@ from cosmos.operators import DbtDocsS3Operator
 from air_quality_helpers import (
     build_rows,
     RAW_TABLE_COLUMNS,
+    transform_feature_rows_for_model_readiness,
     )
 
 logger = logging.getLogger(__name__)
-load_dotenv()
 
 CLICKHOUSE_CONN = "clickhouse_conn"
 MINIO_CONN = "minio_conn"
@@ -312,6 +312,8 @@ def air_quality_live():
         model = None
         MODEL_INFO_JSON_KEY = MODEL_KEY.rsplit("/", 1)[0] + "/" + "model_info.json"
         s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
+        clickhouse_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
+        clickhouse_client = clickhouse_hook.get_client()
 
         create_live_data_view_if_not_exists = SQLExecuteQueryOperator(
             task_id='create_live_data_view_if_not_exists',
@@ -350,11 +352,13 @@ def air_quality_live():
             
             model = pickle.loads(model_obj)
 
-            logger.info(f"model object type: {type(model)}")
-            # TODO:
-            # get the data from the view 
-            # pass it to transform_feature_rows_for_model_readiness()
-            # make predictions using model
+            logger.info(f"model object type: {type(model)}, making predictions")
+            
+            air_pollution_features_df = clickhouse_client.query_df("SELECT * FROM weather_features.feature_air_pollution order by time_of_measurement")
+            air_pollution_features_df = air_pollution_features_df.dropna()
+            features,_ = transform_feature_rows_for_model_readiness(air_pollution_features_df)
+            predictions=model.predict(features)
+            
             # use these values to recreate online table
             pass
 

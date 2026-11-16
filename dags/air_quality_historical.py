@@ -46,7 +46,6 @@ import requests
 from decimal import Decimal
 from typing import Any
 import os
-from dotenv import load_dotenv
 from datetime import (
     datetime, 
     timedelta,
@@ -74,7 +73,6 @@ from air_quality_helpers import (
     )
 
 logger = logging.getLogger(__name__)
-load_dotenv()
 
 CLICKHOUSE_CONN = "clickhouse_conn"
 MINIO_CONN = "minio_conn"

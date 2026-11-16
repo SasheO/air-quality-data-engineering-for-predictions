@@ -31,7 +31,6 @@ from airflow.decorators import (
     )
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from datetime import datetime, timedelta, date
-from dotenv import load_dotenv
 from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
