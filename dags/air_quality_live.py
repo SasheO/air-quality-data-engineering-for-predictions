@@ -86,6 +86,7 @@ SOURCE_SCHEMA_NAME = 'weather_raw'
 FEATURES_SCHEMA_NAME = 'weather_features'
 AIR_QUALITY_RAW_TABLE_NAME = 'air_pollution'
 CITY_COORDINATES_TABLE_NAME = 'city_coordinates'
+PREDICTIONS_LIVE_TABLE = 'online_air_pollution_predictions'
 
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "air-quality")
 MINIO_CONN_ID="minio_conn"
@@ -94,7 +95,7 @@ OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY")
 SECRET_SIGNING_KEY = os.getenv("SECRET_SIGNING_KEY")
 
 # TODO: think of an automatic way of getting the most recently trained and accurate model that does not involve passing in the model key
-MODEL_KEY = "air_quality_models/train-2026-11-15/model.pkl"
+MODEL_KEY = "air_quality_models/train-2026-11-17/model.pkl"
 
 
 profile_config = ProfileConfig(
@@ -309,7 +310,6 @@ def air_quality_live():
 
     @task_group
     def refresh_online_table():
-        model = None
         MODEL_INFO_JSON_KEY = MODEL_KEY.rsplit("/", 1)[0] + "/" + "model_info.json"
         s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
         clickhouse_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
@@ -354,13 +354,70 @@ def air_quality_live():
 
             logger.info(f"model object type: {type(model)}, making predictions")
             
-            air_pollution_features_df = clickhouse_client.query_df("SELECT * FROM weather_features.feature_air_pollution order by time_of_measurement")
-            air_pollution_features_df = air_pollution_features_df.dropna()
+            air_pollution_features_df = clickhouse_client.query_df(f"SELECT * FROM {FEATURES_SCHEMA_NAME}.feature_air_pollution_latest")
+
             features,_ = transform_feature_rows_for_model_readiness(air_pollution_features_df)
-            predictions=model.predict(features)
+            predictions=list(model.predict(features))
             
-            # use these values to recreate online table
-            pass
+            lat_and_long_encoding_ids_in_order = air_pollution_features_df['lat_and_long_encoding_id'].tolist()
+            local_time_of_measurement_in_order = air_pollution_features_df['time_of_measurement'].tolist()
+            current_aqis_in_order = air_pollution_features_df['aqi'].tolist()
+
+            city_coordinate_result = clickhouse_client.query(
+                f"""
+                SELECT 
+                    lat_and_long_encoding_id,
+                    latitude_coordinate,
+                    longitude_coordinate,
+                    city,
+                    country
+                FROM {FEATURES_SCHEMA_NAME}.city_coordinates
+                """
+            )
+
+            city_coordinate_dict = {}
+            for row in city_coordinate_result.result_rows:
+                city_dict = dict(zip(city_coordinate_result.column_names, row))
+                city_coordinate_dict[city_dict["lat_and_long_encoding_id"]] = city_dict
+            
+            insert_rows = []
+
+            for indx in range(len(lat_and_long_encoding_ids_in_order)):
+                encoding_id = lat_and_long_encoding_ids_in_order[indx]
+                prediction = predictions[indx]
+                local_time = local_time_of_measurement_in_order[indx]
+                current_aqi = current_aqis_in_order[indx]
+                city = city_coordinate_dict[encoding_id]["city"]
+                country = city_coordinate_dict[encoding_id]["country"]
+                latitude_coordinate = city_coordinate_dict[encoding_id]["latitude_coordinate"]
+                longitude_coordinate = city_coordinate_dict[encoding_id]["longitude_coordinate"]
+                insert_rows.append((local_time, city, country, latitude_coordinate, longitude_coordinate, current_aqi, prediction))
+        
+            clickhouse_client.command(
+                f"""
+                CREATE OR REPLACE TABLE {FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}
+                (
+                    local_time_of_measurement DateTime, 
+                    city String, 
+                    country String, 
+                    latitude_coordinate Decimal(10, 7), 
+                    longitude_coordinate Decimal(10, 7), 
+                    current_aqi UInt8, 
+                    prediction UInt8
+                )
+                ENGINE = MergeTree
+                ORDER BY ()
+                """
+            )
+
+            if insert_rows:
+                clickhouse_hook.bulk_insert_rows(
+                    table=f"{FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}",
+                    rows=insert_rows,
+                    column_names=["local_time_of_measurement", "city", "country", "latitude_coordinate", "longitude_coordinate", "current_aqi", "prediction"]
+                )
+
+            logger.info(f"Updated live table `{FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}` with {len(insert_rows)}")
 
         create_live_data_view_if_not_exists >> extract_model_and_make_prediction()
 
