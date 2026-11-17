@@ -307,143 +307,123 @@ def air_quality_live():
         folder_dir="/dbt_docs"
     )
 
-    @task_group
+    @task
     def refresh_online_table():
+        import hmac, hashlib, json, pickle
         MODEL_INFO_JSON_KEY = MODEL_KEY.rsplit("/", 1)[0] + "/" + "model_info.json"
         s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
         clickhouse_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
         clickhouse_client = clickhouse_hook.get_client()
 
-        create_live_data_view_if_not_exists = SQLExecuteQueryOperator(
-            task_id='create_live_data_view_if_not_exists',
-            sql = f"""create view if not exists {FEATURES_SCHEMA_NAME}.feature_air_pollution_latest
-            as
+        if not s3_hook.check_for_key(MODEL_INFO_JSON_KEY, MINIO_BUCKET_NAME):
+            raise FileNotFoundError(f"Could not find the json metadata file: {MODEL_INFO_JSON_KEY}")
+        
+        if not s3_hook.check_for_key(MODEL_KEY, MINIO_BUCKET_NAME):
+            raise FileNotFoundError(f"Could not find the chosen model: {MODEL_KEY}")
+        
+        json_metadata_dict = json.loads(s3_hook.get_key(MODEL_INFO_JSON_KEY, MINIO_BUCKET_NAME).get()["Body"].read())
+        model_s3_object = s3_hook.get_key(MODEL_KEY, MINIO_BUCKET_NAME)
+        model_obj = model_s3_object.get()['Body'].read()
+
+        model_name = MODEL_KEY.rsplit("/", 1)[-1]
+
+        received_signature = json_metadata_dict.get(model_name, {}).get("signature", "")
+        expected_signature = hmac.new(SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(received_signature, expected_signature):
+            raise ValueError(f"Signature mismatch on {MODEL_KEY}")
+        
+        model = pickle.loads(model_obj)
+
+        logger.info(f"model object type: {type(model)}, making predictions")
+        
+        air_pollution_features_df = clickhouse_client.query_df(f"""
+        SELECT 
+            *
+        FROM {FEATURES_SCHEMA_NAME}.feature_air_pollution
+        where time_of_measurement_utc >= (now('UTC') - (INTERVAL 6 HOUR + INTERVAL 30 MINUTE))
+        and aqi_6_hour_ahead is null""")
+
+        llei = [x[0] for x in clickhouse_client.query(f"""
+        SELECT 
+            distinct lat_and_long_encoding_id
+        FROM {FEATURES_SCHEMA_NAME}.feature_air_pollution
+        order by lat_and_long_encoding_id
+        """).result_rows]
+
+        features,_ = transform_feature_rows_for_model_readiness(air_pollution_features_df, llei)
+        predictions=list(model.predict(features))
+        
+        lat_and_long_encoding_ids_in_order = air_pollution_features_df['lat_and_long_encoding_id'].tolist()
+        local_time_of_measurement_in_order = air_pollution_features_df['time_of_measurement'].tolist()
+        current_aqis_in_order = air_pollution_features_df['aqi'].tolist()
+
+        city_coordinate_result = clickhouse_client.query(
+            f"""
             SELECT 
-                *
-            FROM {FEATURES_SCHEMA_NAME}.feature_air_pollution
-            where time_of_measurement_utc >= (now('UTC') - (INTERVAL 6 HOUR + INTERVAL 30 MINUTE))
-            and aqi_6_hour_ahead is null
-            COMMENT 'Gets the most recent rows for which the target column of aqi_6_hours_ahead is not known from {FEATURES_SCHEMA_NAME}.feature_air_pollution';
-            """,
-            conn_id=CLICKHOUSE_CONN,
+                lat_and_long_encoding_id,
+                latitude_coordinate,
+                longitude_coordinate,
+                city,
+                country
+            FROM {FEATURES_SCHEMA_NAME}.city_coordinates
+            """
         )
 
-        @task
-        def extract_model_and_make_prediction():
-            import hmac, hashlib, json, pickle
-
-            if not s3_hook.check_for_key(MODEL_INFO_JSON_KEY, MINIO_BUCKET_NAME):
-                raise FileNotFoundError(f"Could not find the json metadata file: {MODEL_INFO_JSON_KEY}")
-            
-            if not s3_hook.check_for_key(MODEL_KEY, MINIO_BUCKET_NAME):
-                raise FileNotFoundError(f"Could not find the chosen model: {MODEL_KEY}")
-            
-            json_metadata_dict = json.loads(s3_hook.get_key(MODEL_INFO_JSON_KEY, MINIO_BUCKET_NAME).get()["Body"].read())
-            model_s3_object = s3_hook.get_key(MODEL_KEY, MINIO_BUCKET_NAME)
-            model_obj = model_s3_object.get()['Body'].read()
-
-            model_name = MODEL_KEY.rsplit("/", 1)[-1]
-
-            received_signature = json_metadata_dict.get(model_name, {}).get("signature", "")
-            expected_signature = hmac.new(SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
-            if not hmac.compare_digest(received_signature, expected_signature):
-                raise ValueError(f"Signature mismatch on {MODEL_KEY}")
-            
-            model = pickle.loads(model_obj)
-
-            logger.info(f"model object type: {type(model)}, making predictions")
-            
-            air_pollution_features_df = clickhouse_client.query_df(f"""
-            SELECT 
-                *
-            FROM {FEATURES_SCHEMA_NAME}.feature_air_pollution
-            where time_of_measurement_utc >= (now('UTC') - (INTERVAL 6 HOUR + INTERVAL 30 MINUTE))
-            and aqi_6_hour_ahead is null""")
-
-            llei = [x[0] for x in clickhouse_client.query(f"""
-            SELECT 
-                distinct lat_and_long_encoding_id
-            FROM {FEATURES_SCHEMA_NAME}.feature_air_pollution
-            order by lat_and_long_encoding_id
-            """).result_rows]
-
-            features,_ = transform_feature_rows_for_model_readiness(air_pollution_features_df, llei)
-            predictions=list(model.predict(features))
-            
-            lat_and_long_encoding_ids_in_order = air_pollution_features_df['lat_and_long_encoding_id'].tolist()
-            local_time_of_measurement_in_order = air_pollution_features_df['time_of_measurement'].tolist()
-            current_aqis_in_order = air_pollution_features_df['aqi'].tolist()
-
-            city_coordinate_result = clickhouse_client.query(
-                f"""
-                SELECT 
-                    lat_and_long_encoding_id,
-                    latitude_coordinate,
-                    longitude_coordinate,
-                    city,
-                    country
-                FROM {FEATURES_SCHEMA_NAME}.city_coordinates
-                """
-            )
-
-            city_coordinate_dict = {}
-            for row in city_coordinate_result.result_rows:
-                city_dict = dict(zip(city_coordinate_result.column_names, row))
-                city_coordinate_dict[city_dict["lat_and_long_encoding_id"]] = city_dict
-            
-            insert_rows = []
-
-            for indx in range(len(lat_and_long_encoding_ids_in_order)):
-                encoding_id = lat_and_long_encoding_ids_in_order[indx]
-                prediction = predictions[indx]
-                local_time = local_time_of_measurement_in_order[indx]
-                current_aqi = current_aqis_in_order[indx]
-                city = city_coordinate_dict[encoding_id]["city"]
-                country = city_coordinate_dict[encoding_id]["country"]
-                latitude_coordinate = city_coordinate_dict[encoding_id]["latitude_coordinate"]
-                longitude_coordinate = city_coordinate_dict[encoding_id]["longitude_coordinate"]
-                insert_rows.append((local_time, city, country, latitude_coordinate, longitude_coordinate, current_aqi, prediction))
+        city_coordinate_dict = {}
+        for row in city_coordinate_result.result_rows:
+            city_dict = dict(zip(city_coordinate_result.column_names, row))
+            city_coordinate_dict[city_dict["lat_and_long_encoding_id"]] = city_dict
         
-            clickhouse_client.command(
-                f"""
-                CREATE OR REPLACE TABLE {FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}
-                (
-                    local_time_of_measurement DateTime, 
-                    city String, 
-                    country String, 
-                    latitude_coordinate Decimal(10, 7), 
-                    longitude_coordinate Decimal(10, 7), 
-                    current_aqi UInt8, 
-                    prediction UInt8
-                )
-                ENGINE = MergeTree
-                ORDER BY ()
-                """
+        insert_rows = []
+
+        for indx in range(len(lat_and_long_encoding_ids_in_order)):
+            encoding_id = lat_and_long_encoding_ids_in_order[indx]
+            prediction = predictions[indx]
+            local_time = local_time_of_measurement_in_order[indx]
+            current_aqi = current_aqis_in_order[indx]
+            city = city_coordinate_dict[encoding_id]["city"]
+            country = city_coordinate_dict[encoding_id]["country"]
+            latitude_coordinate = city_coordinate_dict[encoding_id]["latitude_coordinate"]
+            longitude_coordinate = city_coordinate_dict[encoding_id]["longitude_coordinate"]
+            insert_rows.append((local_time, city, country, latitude_coordinate, longitude_coordinate, current_aqi, prediction))
+    
+        clickhouse_client.command(
+            f"""
+            CREATE OR REPLACE TABLE {FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}
+            (
+                local_time_of_measurement DateTime, 
+                city String, 
+                country String, 
+                latitude_coordinate Decimal(10, 7), 
+                longitude_coordinate Decimal(10, 7), 
+                current_aqi UInt8, 
+                prediction UInt8
+            )
+            ENGINE = MergeTree
+            ORDER BY ()
+            """
+        )
+
+        if insert_rows:
+            clickhouse_hook.bulk_insert_rows(
+                table=f"{FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}",
+                rows=insert_rows,
+                column_names=["local_time_of_measurement", "city", "country", "latitude_coordinate", "longitude_coordinate", "current_aqi", "prediction"]
             )
 
-            if insert_rows:
-                clickhouse_hook.bulk_insert_rows(
-                    table=f"{FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}",
-                    rows=insert_rows,
-                    column_names=["local_time_of_measurement", "city", "country", "latitude_coordinate", "longitude_coordinate", "current_aqi", "prediction"]
-                )
+        logger.info(f"Updated live table `{FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}` with {len(insert_rows)}")
 
-            logger.info(f"Updated live table `{FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}` with {len(insert_rows)}")
-
-        @task
-        def update_6_hour_ahead_aqi_in_offline_table():
-            pass
-        create_live_data_view_if_not_exists >> extract_model_and_make_prediction()
-
+    @task
+    def update_6_hour_ahead_aqi_in_offline_table():
         pass
 
-    # TODO: when fetching hourly data, also write current aqi to five hours ago for the respective columns.
-    '''
-    for writing target to five hours ago, first get all current city rows from weather_features.city_coordinates snapshot to get their respective lat_and_long_encoding_id
-    
-    map cities to their lat and long encoding id in python.
-    use a dynamic task to expand the params and run a lightweight update for each of the cities/lat_and_long_encoding_ids
-    '''
+        # TODO: when fetching hourly data, also write current aqi to five hours ago for the respective columns.
+        '''
+        for writing target to five hours ago, first get all current city rows from weather_features.city_coordinates snapshot to get their respective lat_and_long_encoding_id
+        
+        map cities to their lat and long encoding id in python.
+        use a dynamic task to expand the params and run a lightweight update for each of the cities/lat_and_long_encoding_ids
+        '''
 
     city_coordinates = get_city_coordinates()
     wcarapt = write_city_and_raw_air_pollution_data(city_coordinates)
