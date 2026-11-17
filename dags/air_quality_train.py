@@ -77,7 +77,11 @@ def train_and_save_model():
             logger.info(f"Bucket {MINIO_BUCKET_NAME} already exists. Skipping creation.")
     
     @task()
-    def train_model():
+    def train_and_save_model_to_bucket():
+        import hashlib
+        import hmac
+        import pickle
+        import io
         loss_function_name = 'multi_logloss'
 
         # fetch and prepare data
@@ -121,26 +125,11 @@ def train_and_save_model():
             "loss_function": loss_function_name
         }
 
-        return model_stats
-
-        
-    @task()
-    def pickle_and_save_model_to_bucket(model_stats: dict):
-        '''
-        saves model to air_quality/air_quality_models/train-<date-of-training>/<model-name>
-        it also saves information on the model to air_quality/air_quality_models/train-<date-of-training>/model_info.json, keyed by <model-name>
-        '''
-        import hashlib
-        import hmac
-        import pickle
-        import io
-
         model_obj = pickle.dumps(model)
         signature = hmac.new(SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
 
         today_date_str = date.today().isoformat()
         folder_prefix = f'{MINIO_AIR_QUALITY_MODELS_PATH}/train-{today_date_str}'
-        
     
         # check if any objects exist under that prefix and number models if so, number the model e.g. more than one model trained in the same day
         keys = s3_hook.list_keys(
@@ -185,14 +174,12 @@ def train_and_save_model():
             replace=True
         )
 
-        model_info = {
-            "model_storage_key": model_storage_key
-        }
+        model_stats["model_storage_key"] = model_storage_key
 
-        return model_info
+        return model_stats
 
     @task
-    def log_model_stats_to_clickhouse(model_stats: dict, model_info: dict):
+    def log_model_stats_to_clickhouse(model_stats: dict):
         ch_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
         model_table_columns = [
             "model_name",
@@ -207,10 +194,10 @@ def train_and_save_model():
             ]
 
         model_stat_row = [
-            model_info.get("model_storage_key"),
+            model_stats.get("model_storage_key"),
             "lightgbm.LGBMClassifier",
             MODEL_CLASS,
-            model_info.get("model_storage_key"),
+            model_stats.get("model_storage_key"),
             model_stats.get("final_train_error"),
             model_stats.get("loss_function"),
             datetime.now(), # this is currently stored as date time of server. TODO: store this as a given time zone for consistency e.g. UTC always
@@ -226,12 +213,11 @@ def train_and_save_model():
 
         logger.info(f"saved: {dict(zip(model_table_columns, model_stat_row))}")
 
-    model_stats = train_model() 
+    model_stats = train_and_save_model_to_bucket() 
     cb = create_bucket_if_not_exists()
-    model_info = pickle_and_save_model_to_bucket(model_stats)
-    log_model_stats_to_clickhouse(model_stats, model_info)
+    cb >> model_stats
+    log_model_stats_to_clickhouse(model_stats)
 
-    cb >> model_info
 
 @dag(
     dag_id="air_quality_train",
