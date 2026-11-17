@@ -89,7 +89,7 @@ def build_rows(city_dict: dict[str, str], payload: dict, dag_run_id: str, output
             row_count += 1
     logger.info(f"{row_count} queued for insertion")
 
-def transform_feature_rows_for_model_readiness(air_pollution_features_df: pd.DataFrame) -> tuple:
+def transform_feature_rows_for_model_readiness(air_pollution_features_df: pd.DataFrame, latitude_and_longitude_encoding_ids:list) -> tuple:
     '''
     applies one hot encoding to lat_and_long_encoding_id and season
     drops air_pollution_features_row_id, time_of_measurement_utc, time_of_measurement
@@ -98,9 +98,13 @@ def transform_feature_rows_for_model_readiness(air_pollution_features_df: pd.Dat
         X: pd.DataFrame of X features
         Y: pd.Series of y features
     '''
-    # Appy one-hot encoding per city and season. remove air_pollution_features_row_id. remove time of measurement. 
+    # Appy one-hot encoding per city and season in the same order every time
+    air_pollution_features_df['season'] = pd.Categorical(air_pollution_features_df['season'], categories=['Autumn', 'Dry Season', 'Rainy Season', 'Spring', 'Summer', 'Winter'], ordered=True)
+    air_pollution_features_df['lat_and_long_encoding_id'] = pd.Categorical(air_pollution_features_df['lat_and_long_encoding_id'], categories=latitude_and_longitude_encoding_ids, ordered=True)
     air_pollution_features_df = pd.get_dummies(air_pollution_features_df, columns=['lat_and_long_encoding_id'], dtype=int)
     air_pollution_features_df = pd.get_dummies(air_pollution_features_df, columns=['season'], dtype=int)
+
+    # remove air_pollution_features_row_id. remove time of measurement. 
     air_pollution_features_df=air_pollution_features_df.drop(columns="air_pollution_features_row_id")
     air_pollution_features_df=air_pollution_features_df.drop(columns="time_of_measurement_utc")
     air_pollution_features_df=air_pollution_features_df.drop(columns="time_of_measurement") # relevant time feature

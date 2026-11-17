@@ -87,7 +87,15 @@ def train_and_save_model():
         # fetch and prepare data
         air_pollution_features_df = clickhouse_client.query_df("SELECT * FROM weather_features.feature_air_pollution order by time_of_measurement")
         air_pollution_features_df = air_pollution_features_df.dropna()
-        X,Y = transform_feature_rows_for_model_readiness(air_pollution_features_df)
+
+        llei = [x[0] for x in clickhouse_client.query(f"""
+            SELECT 
+                distinct lat_and_long_encoding_id
+            FROM weather_features.feature_air_pollution
+            order by lat_and_long_encoding_id
+            """).result_rows]
+        
+        X,Y = transform_feature_rows_for_model_readiness(air_pollution_features_df, llei)
 
         # Slice chronologically using .iloc; 80-20 split
         split_idx = int(len(air_pollution_features_df) * 0.8)

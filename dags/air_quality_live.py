@@ -95,8 +95,7 @@ OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY")
 SECRET_SIGNING_KEY = os.getenv("SECRET_SIGNING_KEY")
 
 # TODO: think of an automatic way of getting the most recently trained and accurate model that does not involve passing in the model key
-MODEL_KEY = "air_quality_models/train-2026-11-17/model.pkl"
-
+MODEL_KEY = "air_quality_models/train-2026-11-17/model2.pkl"
 
 profile_config = ProfileConfig(
     profile_name="air_quality_dbt_profile",
@@ -354,9 +353,21 @@ def air_quality_live():
 
             logger.info(f"model object type: {type(model)}, making predictions")
             
-            air_pollution_features_df = clickhouse_client.query_df(f"SELECT * FROM {FEATURES_SCHEMA_NAME}.feature_air_pollution_latest")
+            air_pollution_features_df = clickhouse_client.query_df(f"""
+            SELECT 
+                *
+            FROM {FEATURES_SCHEMA_NAME}.feature_air_pollution
+            where time_of_measurement_utc >= (now('UTC') - (INTERVAL 6 HOUR + INTERVAL 30 MINUTE))
+            and aqi_6_hour_ahead is null""")
 
-            features,_ = transform_feature_rows_for_model_readiness(air_pollution_features_df)
+            llei = [x[0] for x in clickhouse_client.query(f"""
+            SELECT 
+                distinct lat_and_long_encoding_id
+            FROM {FEATURES_SCHEMA_NAME}.feature_air_pollution
+            order by lat_and_long_encoding_id
+            """).result_rows]
+
+            features,_ = transform_feature_rows_for_model_readiness(air_pollution_features_df, llei)
             predictions=list(model.predict(features))
             
             lat_and_long_encoding_ids_in_order = air_pollution_features_df['lat_and_long_encoding_id'].tolist()
@@ -419,6 +430,9 @@ def air_quality_live():
 
             logger.info(f"Updated live table `{FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}` with {len(insert_rows)}")
 
+        @task
+        def update_6_hour_ahead_aqi_in_offline_table():
+            pass
         create_live_data_view_if_not_exists >> extract_model_and_make_prediction()
 
         pass
