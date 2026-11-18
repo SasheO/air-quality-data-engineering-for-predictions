@@ -131,14 +131,6 @@ default_args = {
         }
 }
 
-def read_sql_script(relative_include_path:str) -> str:
-    '''
-    pass in the path here the same way you would pass it in to an Airflow operator
-    '''
-    with open(f"{INCLUDE_PATH}/{relative_include_path}", "r") as f:
-        sql = f.read()
-    return sql
-
 
 @dag(
     dag_id="air_quality_historical",
