@@ -271,18 +271,6 @@ def air_quality_live():
                     column_names=RAW_TABLE_COLUMNS
                 )
 
-            location_to_time_and_aqi_mapping = {}
-            for indx in range(len(RAW_TABLE_COLUMNS)):
-                if RAW_TABLE_COLUMNS[indx] == "lat_and_long_encoding_id":
-                    lat_and_long_encoding_id_indx = indx
-                if RAW_TABLE_COLUMNS[indx] == "aqi":
-                    aqi_indx = indx
-                if RAW_TABLE_COLUMNS[indx] == "time_of_measurement":
-                    time_of_measurement_indx = indx
-            for row in insert_rows_with_city_data:
-                location_to_time_and_aqi_mapping[row[lat_and_long_encoding_id_indx]] = (row[time_of_measurement_indx], row[aqi_indx])
-            
-            return location_to_time_and_aqi_mapping
 
         write_air_pollution_data = SQLExecuteQueryOperator(
         task_id='write_air_pollution_data',
@@ -290,11 +278,11 @@ def air_quality_live():
         conn_id=CLICKHOUSE_CONN,
     )
         write_city_data_task = write_city_data(city_coordinates)
-        ingest_air_pollution_data_task_output = ingest_air_pollution_data(city_coordinates)
+        ingest_air_pollution_task = ingest_air_pollution_data(city_coordinates)
 
-        truncate_city_coordinates >> write_city_data_task >> ingest_air_pollution_data_task_output >> write_air_pollution_data
+        truncate_city_coordinates >> write_city_data_task >> ingest_air_pollution_task >> write_air_pollution_data
 
-        return ingest_air_pollution_data_task_output
+        
     
     @task()
     def create_bucket_if_not_exists():
@@ -400,12 +388,13 @@ def air_quality_live():
             country = city_coordinate_dict[encoding_id]["country"]
             latitude_coordinate = city_coordinate_dict[encoding_id]["latitude_coordinate"]
             longitude_coordinate = city_coordinate_dict[encoding_id]["longitude_coordinate"]
-            insert_rows.append((local_time, city, country, latitude_coordinate, longitude_coordinate, current_aqi, prediction))
+            insert_rows.append((encoding_id, local_time, city, country, latitude_coordinate, longitude_coordinate, current_aqi, prediction))
     
         clickhouse_client.command(
             f"""
             CREATE OR REPLACE TABLE {FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}
             (
+                lat_and_long_encoding_id String,
                 local_time_of_measurement DateTime, 
                 city String, 
                 country String, 
@@ -419,38 +408,62 @@ def air_quality_live():
             """
         )
 
+        insert_columns = ["lat_and_long_encoding_id", "local_time_of_measurement", "city", "country", "latitude_coordinate", "longitude_coordinate", "current_aqi", "prediction"]
+
         if insert_rows:
             clickhouse_hook.bulk_insert_rows(
                 table=f"{FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}",
                 rows=insert_rows,
-                column_names=["local_time_of_measurement", "city", "country", "latitude_coordinate", "longitude_coordinate", "current_aqi", "prediction"]
+                column_names=insert_columns
             )
 
         logger.info(f"Updated live table `{FEATURES_SCHEMA_NAME}.{PREDICTIONS_LIVE_TABLE}` with {len(insert_rows)}")
+
+        location_to_time_and_aqi_mapping = {}
+        for indx in range(len(insert_columns)):
+            if insert_columns[indx] == "lat_and_long_encoding_id":
+                lat_and_long_encoding_id_indx = indx
+            if insert_columns[indx] == "current_aqi":
+                aqi_indx = indx
+            if insert_columns[indx] == "local_time_of_measurement":
+                time_of_measurement_indx = indx
+        for row in insert_rows:
+            location_to_time_and_aqi_mapping[row[lat_and_long_encoding_id_indx]] = (row[time_of_measurement_indx].isoformat(), row[aqi_indx])
+        
+        logger.info(f"location_to_time_and_aqi_mapping: {location_to_time_and_aqi_mapping}")
+        
+        return location_to_time_and_aqi_mapping
 
     @task
     def update_6_hour_ahead_aqi_in_offline_table(location_to_time_and_aqi_mapping: dict[str, tuple]):
         # when fetching hourly data, also write current aqi to 6 hours ago for the target columns
         from jinja2 import Template
 
+        if not location_to_time_and_aqi_mapping:
+            logger.info("Nothing to update")
+            return
+
         clickhouse_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
 
         min_time_of_measurement = min([tup[0] for tup in location_to_time_and_aqi_mapping.values()])
 
         query = Template(read_sql_script("sql/update_target_aqi_live.sql")).render(location_to_time_and_aqi_mapping=location_to_time_and_aqi_mapping, min_time_of_measurement=min_time_of_measurement)
-        clickhouse_hook.execute(query)
+        logger.info(query)
+        # to ensure lightweight update allowed. this command is idempotent
+        clickhouse_hook.run("ALTER TABLE weather_features.feature_air_pollution MODIFY SETTING enable_block_number_column = 1, enable_block_offset_column = 1;")
+        clickhouse_hook.run(query)
 
     city_coordinates = get_city_coordinates()
     wcarapt = write_city_and_raw_air_pollution_data(city_coordinates)
     cbine = create_bucket_if_not_exists()
     rot = refresh_online_table()
-    uot = update_6_hour_ahead_aqi_in_offline_table(wcarapt)
+    uot = update_6_hour_ahead_aqi_in_offline_table(rot)
 
     create_schema_if_not_exists >> create_tables 
     
     create_tables >> city_coordinates
 
-    city_coordinates >> wcarapt >> dbt_models >> [rot, uot]
+    city_coordinates >> wcarapt >> dbt_models >> rot >> uot
 
     cbine >> dbt_models >> generate_dbt_docs_to_minio_bucket 
     
