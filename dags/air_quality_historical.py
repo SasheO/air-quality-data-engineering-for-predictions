@@ -135,7 +135,7 @@ default_args = {
 @dag(
     dag_id="air_quality_historical",
     start_date=datetime(2023, 1, 1),
-    end_date=datetime(2026, 11, 1),
+    end_date=datetime(2026, 11, 1), # TODO: update to desired end date
     schedule="0 6 1 * *", # get data for previous month on first of the next month at 6 AM
     template_searchpath=[INCLUDE_PATH],
     default_args=default_args,
