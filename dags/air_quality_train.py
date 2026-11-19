@@ -1,25 +1,50 @@
 """
+```markdown
 # Train Air Quality Model
 
 ## Overview
-Trains an Light GBM model with all data in `weather_features.feature_air_quality` and saves it to minio bucket in a `train-<datestamp>` folder with a metadata description file. It saves models in a dictionary with HMAC singature in "signature" key and the actual model in "payload" key. The model can be reloaded into a python object using the pickle library, but the HMAC signature should always be checked for security purposes.
+Trains a LightGBM (`LGBMClassifier`) model on all data in `weather_features.feature_air_pollution` and saves it to the MinIO bucket under a `train-<datestamp>` folder, alongside a metadata description file. Each model is stored as a pickled object; its metadata entry includes an HMAC-SHA256 signature in the `"signature"` key, and the model can be reloaded with the `pickle` library. The HMAC signature should always be verified before loading for security purposes.
 
 ## Schedule
-- None — (ony when triggered)
+- None — triggered manually only.
 
 ## DAG Task Dependencies
-TODO
-
+```
+setup_schema_and_tables >> train_and_save_model (task group)
+train_and_save_model:
+    create_bucket_if_not_exists >> train_and_save_model_to_bucket >> log_model_stats_to_clickhouse
+```
 
 ## Tasks
 
-### `task-1`
-TODO
+### `setup_schema_and_tables`
+SQLExecuteQueryOperator. Runs `sql/create_training_model_table.sql` (split into statements) against ClickHouse to create the `monitoring.ml_model_stats` table (and any related schema) if it does not exist.
+
+### `train_and_save_model` (task group)
+
+1. **`create_bucket_if_not_exists`** — Creates the MinIO/S3 bucket (`MINIO_BUCKET_NAME`) if it does not already exist.
+
+2. **`train_and_save_model_to_bucket`**
+   - Queries all rows from `weather_features.feature_air_pollution` (ordered by `time_of_measurement`), drops nulls, and builds features via `transform_feature_rows_for_model_readiness`.
+   - Performs a chronological 80/20 train/test split (`iloc`), fits the `LGBMClassifier` with `multi_logloss`, and logs accuracy plus final training error.
+   - Computes model stats: current-vs-target AQI match fraction, final train error, train/test label means and variances, accuracy score, and loss function name.
+   - Pickles the model, computes its HMAC-SHA256 signature with `SECRET_SIGNING_KEY`, and uploads it to `air_quality_models/train-<YYYY-MM-DD>/model.pkl` (or `model<N>.pkl` if models already exist for that day).
+   - Writes/updates `model_info.json` in the same folder, appending the new model's stats and signature keyed by model filename. Returns the stats dict (including `model_storage_key`).
+
+3. **`log_model_stats_to_clickhouse`** — Bulk-inserts a row into `monitoring.ml_model_stats` capturing model name, type (`lightgbm.LGBMClassifier`), class (`air_quality`), storage key, final loss value, loss function, entry timestamp (server time), full stats JSON, and a `first_entry` flag.
 
 ## Required Variables/Connections
+| Variable | Description |
+|---|---|
+| `SECRET_SIGNING_KEY` | HMAC key used to sign the pickled model. |
+| `MINIO_BUCKET_NAME` | MinIO bucket name for model artifacts. |
+| `MY_EMAIL` | (Optional) Recipient for failure emails. |
+
 | Connection | Description |
 |---|---|
-| `minio_conn` | Minio connection used for writing pickled model to object storage. |
+| `minio_conn` | MinIO connection used for writing the pickled model and metadata to object storage. |
+| `clickhouse_conn` | ClickHouse connection used for reading features and writing model stats. |
+```
 """
 import logging
 import os

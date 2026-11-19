@@ -2,45 +2,70 @@
 # Air Quality Live
 
 ## Overview
-Fetches realtime air pollution data from the OpenWeather Air Pollution History API for each city in the `city_coordinates` table, covering the entirety of the previous calendar month. Parsed rows are bulk-inserted into `air_quality_datasets.raw` in ClickHouse, where incremental dbt models downstream transform them into features.
+Fetches realtime air pollution data from the OpenWeather Air Pollution API for each city in the `city_coordinates` table, then runs dbt models, refreshes an online predictions table, and backfills 6-hour-ahead AQI targets in the offline feature table.
 
 ## Schedule
 - Cron: `0 * * * *` — beginning of every hour
 - Catchup disabled; `max_active_runs=1`.
 
-
 ## Tasks
 
-*TODO* UPDATE THIS
-
 ### `create_databases_if_not_exists`
-SQLExecuteQueryOperator. Runs `sql/create_database.sql` against ClickHouse to create `air_quality_datasets` if it does not exist.
+SQLExecuteQueryOperator. Runs `sql/create_database.sql` against ClickHouse to create `weather_raw` if it does not exist.
 
 ### `create_tables_if_not_exists`
-SQLExecuteQueryOperator. Runs `sql/create_raw_data_table.sql` (split into statements) to create the `raw` and `city_coordinates` tables if they do not exist.
-
-### `refresh_city_coordinates_table`
-Reads `include/csv/latitudes_and_longitudes.csv`, casts `*_coordinate` columns to `float`, and bulk-inserts all rows into `air_quality_datasets.city_coordinates`.
+SQLExecuteQueryOperator. Runs `sql/create_raw_data_table.sql` (split into statements) to create the raw air pollution table, its staging table, and the `city_coordinates` table if they do not exist.
 
 ### `get_city_coordinates`
-Runs `sql/get_deduplicated_city_coordinates.sql` and returns a list of dicts (one per city) with the columns needed for the API call and row building (e.g. `city_coordinates_id`, `city`, `country`, `latitude_coordinate`, `longitude_coordinate`). Output is XCom'd to `write_previous_month_data`.
+Reads `include/csv/latitudes_and_longitudes.csv`, casts any `*_coordinate` columns to `float`, and returns a list of dicts (one per city). Output is XCom'd to the `write_city_and_raw_air_pollution_data` task group.
 
-### `write_previous_month_data`
-For each city:
-1. Computes the previous-month Unix window (`start`, `end`).
-2. Calls `http://api.openweathermap.org/data/2.5/air_pollution/history` with `lat`, `lon`, `start`, `end`, `appid`.
-3. Parses each hourly entry via `build_rows` into a tuple matching `RAW_TABLE_COLUMNS`; entries with empty `components` are skipped.
-4. Collects all rows across all cities and performs one bulk insert into `air_quality_datasets.raw`. Skips the insert with a warning if no rows were produced.
+### `write_city_and_raw_air_pollution_data` (task group)
+Truncates and repopulates `city_coordinates`, then fetches and stages raw air pollution data.
+
+1. **`truncate_city_table`** — SQLExecuteQueryOperator. Truncates `weather_raw.city_coordinates`.
+2. **`write_city_data`** — Bulk-inserts the parsed city coordinates into `weather_raw.city_coordinates`.
+3. **`ingest_air_pollution_data`** — For each city, calls `http://api.openweathermap.org/data/2.5/air_pollution` with `lat`, `lon`, and `appid`, parses each entry via `build_rows` into a tuple matching `RAW_TABLE_COLUMNS`, and bulk-inserts all rows into `weather_raw.air_pollution_staging`. Skips the insert with a warning if no rows were produced.
+4. **`write_air_pollution_data`** — SQLExecuteQueryOperator. Runs `sql/write_air_pollution_data.sql` to move staged rows into the raw table.
+
+### `create_bucket_if_not_exists`
+Creates the MinIO/S3 bucket (`MINIO_BUCKET_NAME`, default `air-quality`) if it does not already exist.
+
+### `dbt_models` (task group)
+Cosmos `DbtTaskGroup` running the `air_quality_feature_engineering` dbt project against ClickHouse. Tests run after each model (`TestBehavior.AFTER_EACH`); the `pit-correctness-test` tag is excluded.
+
+### `generate_dbt_docs_to_minio_bucket`
+`DbtDocsS3Operator`. Generates dbt docs and uploads them to the `dbt_docs` folder in the MinIO bucket.
+
+### `refresh_online_table`
+1. Verifies the model metadata JSON (`model_info.json` in the model's folder) and the pickled model (`MODEL_KEY`) exist in MinIO.
+2. Validates the model's HMAC-SHA256 signature against `SECRET_SIGNING_KEY`.
+3. Loads the model and queries `weather_features.feature_air_pollution` for rows from the last 6.5 hours with a null `aqi_6_hour_ahead`.
+4. Builds features via `transform_feature_rows_for_model_readiness` and predicts AQI.
+5. Joins predictions back to city coordinates and recreates `weather_features.online_air_pollution_predictions` with the latest rows.
+6. Returns a mapping of `lat_and_long_encoding_id` → `(local_time_of_measurement, current_aqi)` for the downstream backfill.
+
+### `update_6_hour_ahead_aqi_in_offline_table`
+Renders `sql/update_target_aqi_live.sql` with the mapping from `refresh_online_table` and runs it against `weather_features.feature_air_pollution`. Enables `enable_block_number_column` / `enable_block_offset_column` first so the lightweight update is permitted. The command is idempotent. No-op if the mapping is empty.
 
 ## Required Variables
 | Variable | Description |
 |---|---|
-| `OPENWEATHER_API_SECRET_KEY` | OpenWeather API key used for history requests. Set as an encrypted Airflow Variable. |
+| `OPENWEATHER_API_SECRET_KEY` | OpenWeather API key used for pollution requests. Set as an encrypted Airflow Variable. |
+| `SECRET_SIGNING_KEY` | HMAC key used to verify the signature of the pickled model downloaded from MinIO. |
+| `MINIO_BUCKET_NAME` | (Optional) MinIO bucket name; defaults to `air-quality`. |
+| `MY_EMAIL` | (Optional) Recipient for failure emails. |
 
 Also required (as Airflow Connections):
 | Connection | Description |
 |---|---|
 | `clickhouse_conn` | ClickHouse connection used by all SQL and insert tasks. |
+| `minio_conn` | S3-compatible connection to MinIO, used for model artifacts, dbt docs, and bucket management. |
+
+## Constants
+- `MODEL_KEY` — path to the pickled model in MinIO (currently `air_quality_models/train-2026-11-17/model2.pkl`). TODO: derive this automatically from the most recently trained, accurate model rather than hardcoding.
+- `SOURCE_SCHEMA_NAME` = `weather_raw`
+- `FEATURES_SCHEMA_NAME` = `weather_features`
+- `PREDICTIONS_LIVE_TABLE` = `online_air_pollution_predictions`
 """
 import logging
 import requests
