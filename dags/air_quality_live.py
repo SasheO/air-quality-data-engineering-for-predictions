@@ -68,10 +68,8 @@ Also required (as Airflow Connections):
 - `PREDICTIONS_LIVE_TABLE` = `online_air_pollution_predictions`
 """
 import logging
-import requests
 from typing import Any
 import os
-from dotenv import load_dotenv
 from datetime import (
     datetime, 
     timedelta,
@@ -79,8 +77,6 @@ from datetime import (
 
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
-from airflow.operators.python import get_current_context
-from airflow.models import Variable
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.decorators import (
     task_group, 
@@ -116,7 +112,6 @@ PREDICTIONS_LIVE_TABLE = 'online_air_pollution_predictions'
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "air-quality")
 MINIO_CONN_ID="minio_conn"
 
-OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY") 
 SECRET_SIGNING_KEY = os.getenv("SECRET_SIGNING_KEY")
 
 # TODO: think of an automatic way of getting the most recently trained and accurate model that does not involve passing in the model key
@@ -264,6 +259,12 @@ def air_quality_live():
 
         @task
         def ingest_air_pollution_data(_city_coordinates: list[dict[str, Any]]):
+            from airflow.operators.python import get_current_context
+            from airflow.models import Variable
+            import requests
+            
+            OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY") 
+
             context = get_current_context()
             dag_run_id = context["dag_run"].run_id
             
