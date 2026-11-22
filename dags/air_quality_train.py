@@ -28,7 +28,7 @@ SQLExecuteQueryOperator. Runs `sql/create_training_model_table.sql` (split into 
    - Queries all rows from `weather_features.feature_air_pollution` (ordered by `time_of_measurement`), drops nulls, and builds features via `transform_feature_rows_for_model_readiness`.
    - Performs a chronological 80/20 train/test split (`iloc`), fits the `LGBMClassifier` with `multi_logloss`, and logs accuracy plus final training error.
    - Computes model stats: current-vs-target AQI match fraction, final train error, train/test label means and variances, accuracy score, and loss function name.
-   - Pickles the model, computes its HMAC-SHA256 signature with `SECRET_SIGNING_KEY`, and uploads it to `air_quality_models/train-<YYYY-MM-DD>/model.pkl` (or `model<N>.pkl` if models already exist for that day).
+   - Pickles the model, computes its HMAC-SHA256 signature with `ML_MODEL_SECRET_SIGNING_KEY`, and uploads it to `air_quality_models/train-<YYYY-MM-DD>/model.pkl` (or `model<N>.pkl` if models already exist for that day).
    - Writes/updates `model_info.json` in the same folder, appending the new model's stats and signature keyed by model filename. Returns the stats dict (including `model_storage_key`).
 
 3. **`log_model_stats_to_clickhouse`** — Bulk-inserts a row into `monitoring.ml_model_stats` capturing model name, type (`lightgbm.LGBMClassifier`), class (`air_quality`), storage key, final loss value, loss function, entry timestamp (server time), full stats JSON, and a `first_entry` flag.
@@ -36,7 +36,7 @@ SQLExecuteQueryOperator. Runs `sql/create_training_model_table.sql` (split into 
 ## Required Variables/Connections
 | Variable | Description |
 |---|---|
-| `SECRET_SIGNING_KEY` | HMAC key used to sign the pickled model. |
+| `ML_MODEL_SECRET_SIGNING_KEY` | HMAC key used to sign the pickled model. |
 | `MINIO_BUCKET_NAME` | MinIO bucket name for model artifacts. |
 | `MY_EMAIL` | (Optional) Recipient for failure emails. |
 
@@ -67,7 +67,7 @@ MINIO_CONN_ID = "minio_conn"
 EMAIL_ON_FAILURE_LIST = [os.getenv("MY_EMAIL")]
 INCLUDE_PATH = '/opt/airflow/include'
 CLICKHOUSE_CONN = "clickhouse_conn"
-SECRET_SIGNING_KEY = os.getenv("SECRET_SIGNING_KEY")
+ML_MODEL_SECRET_SIGNING_KEY = os.getenv("ML_MODEL_SECRET_SIGNING_KEY")
 MODEL_CLASS="air_quality"
 
 
@@ -159,7 +159,7 @@ def train_and_save_model():
         }
 
         model_obj = pickle.dumps(model)
-        signature = hmac.new(SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
+        signature = hmac.new(ML_MODEL_SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
 
         today_date_str = date.today().isoformat()
         folder_prefix = f'{MINIO_AIR_QUALITY_MODELS_PATH}/train-{today_date_str}'

@@ -50,7 +50,7 @@ Clone this repo onto your device by running this command in your terminal:
 git clone https://github.com/SasheO/air-quality-data-engineering-for-predictions.git
 ```
 
-Copy `.env_example` into a file named `.env` and fill in your environment variables. The environment variables you should change start with `fill_in_`.
+Copy `.env_example` into a file named `.env` and fill in your environment variables. 
 
 - Set `MINIO_ROOT_USER` to `admin` and pick your preferred MinIO password.
 - Set `CLICKHOUSE_USER` to `default` and pick your preferred ClickHouse password.

@@ -38,7 +38,7 @@ Cosmos `DbtTaskGroup` running the `air_quality_feature_engineering` dbt project 
 
 ### `refresh_online_table`
 1. Verifies the model metadata JSON (`model_info.json` in the model's folder) and the pickled model (`MODEL_KEY`) exist in MinIO.
-2. Validates the model's HMAC-SHA256 signature against `SECRET_SIGNING_KEY`.
+2. Validates the model's HMAC-SHA256 signature against `ML_MODEL_SECRET_SIGNING_KEY`.
 3. Loads the model and queries `weather_features.feature_air_pollution` for rows from the last 6.5 hours with a null `aqi_6_hour_ahead`.
 4. Builds features via `transform_feature_rows_for_model_readiness` and predicts AQI.
 5. Joins predictions back to city coordinates and recreates `weather_features.online_air_pollution_predictions` with the latest rows.
@@ -51,7 +51,7 @@ Renders `sql/update_target_aqi_live.sql` with the mapping from `refresh_online_t
 | Variable | Description |
 |---|---|
 | `OPENWEATHER_API_SECRET_KEY` | OpenWeather API key used for pollution requests. Set as an encrypted Airflow Variable. |
-| `SECRET_SIGNING_KEY` | HMAC key used to verify the signature of the pickled model downloaded from MinIO. |
+| `ML_MODEL_SECRET_SIGNING_KEY` | HMAC key used to verify the signature of the pickled model downloaded from MinIO. |
 | `MINIO_BUCKET_NAME` | (Optional) MinIO bucket name; defaults to `air-quality`. |
 | `MY_EMAIL` | (Optional) Recipient for failure emails. |
 
@@ -112,7 +112,7 @@ PREDICTIONS_LIVE_TABLE = 'online_air_pollution_predictions'
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "air-quality")
 MINIO_CONN_ID="minio_conn"
 
-SECRET_SIGNING_KEY = os.getenv("SECRET_SIGNING_KEY")
+ML_MODEL_SECRET_SIGNING_KEY = os.getenv("ML_MODEL_SECRET_SIGNING_KEY")
 
 # TODO: think of an automatic way of getting the most recently trained and accurate model that does not involve passing in the model key
 MODEL_KEY = "air_quality_models/train-2026-11-17/model2.pkl"
@@ -357,7 +357,7 @@ def air_quality_live():
         model_name = MODEL_KEY.rsplit("/", 1)[-1]
 
         received_signature = json_metadata_dict.get(model_name, {}).get("signature", "")
-        expected_signature = hmac.new(SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
+        expected_signature = hmac.new(ML_MODEL_SECRET_SIGNING_KEY.encode('utf-8'), model_obj, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(received_signature, expected_signature):
             raise ValueError(f"Signature mismatch on {MODEL_KEY}")
         
