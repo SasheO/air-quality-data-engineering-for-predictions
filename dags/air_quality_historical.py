@@ -42,8 +42,6 @@ Also required (as Airflow Connections):
 | `clickhouse_conn` | ClickHouse connection used by all SQL and insert tasks. |
 """
 import logging
-import requests
-from decimal import Decimal
 from typing import Any
 import os
 from datetime import (
@@ -52,10 +50,6 @@ from datetime import (
     )
 
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
-from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
-from airflow.operators.python import get_current_context
-from airflow.models import Variable
-from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.decorators import (
     task_group, 
     task, 
@@ -85,8 +79,6 @@ CITY_COORDINATES_TABLE_NAME = 'city_coordinates'
 
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "air-quality")
 MINIO_CONN_ID="minio_conn"
-
-OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY") 
 
 EMAIL_ON_FAILURE_LIST = [os.getenv("MY_EMAIL")]
 
@@ -196,6 +188,8 @@ def air_quality_historical():
         arguments:
             city_coordinates: An XComArg resolving to a list of dicts with city,country,latitude_coordinate,longitude_coordinate
         """
+        from airflow.providers.clickhousedb.hooks.clickhouse import ClickHouseHook
+
         ch_hook = ClickHouseHook(clickhouse_conn_id=CLICKHOUSE_CONN)
         
         truncate_city_coordinates = SQLExecuteQueryOperator(
@@ -226,6 +220,11 @@ def air_quality_historical():
 
         @task
         def ingest_air_pollution_data(_city_coordinates: list[dict[str, Any]]):
+            from airflow.models import Variable
+            import requests
+            from airflow.operators.python import get_current_context
+
+            OPENWEATHER_API_SECRET_KEY = Variable.get("OPENWEATHER_API_SECRET_KEY") 
             context = get_current_context()
             dag_run_id = context["dag_run"].run_id
             date_interval_start = context["data_interval_start"].subtract(hours=6) # subtract 6 hours because the pipeline at 6 am but i want from midnight on previous month to midnight just before this month starts
@@ -277,6 +276,7 @@ def air_quality_historical():
     
     @task()
     def create_bucket_if_not_exists():
+        from airflow.providers.amazon.aws.hooks.s3 import S3Hook
         hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
         
         if not hook.check_for_bucket(MINIO_BUCKET_NAME):
