@@ -131,10 +131,10 @@ where time_of_measurement > (select coalesce(max(time_of_measurement_utc),'1970-
 {% endif %}
 
 window
-    w_1h   as (partition by lat_and_long_encoding_id order by time_of_measurement range between 3300   preceding and 3900   preceding),
-    w_3h   as (partition by lat_and_long_encoding_id order by time_of_measurement range between 10500  preceding and 11100  preceding),
-    w_24h  as (partition by lat_and_long_encoding_id order by time_of_measurement range between 86100  preceding and 86700  preceding),
-    w_168h as (partition by lat_and_long_encoding_id order by time_of_measurement range between 604500 preceding and 605100 preceding),
+    w_1h   as (partition by lat_and_long_encoding_id order by time_of_measurement range between 3900   preceding and 3300   preceding),
+    w_3h   as (partition by lat_and_long_encoding_id order by time_of_measurement range between 11100  preceding and 10500  preceding),
+    w_24h  as (partition by lat_and_long_encoding_id order by time_of_measurement range between 86700  preceding and 86100  preceding),
+    w_168h as (partition by lat_and_long_encoding_id order by time_of_measurement range between 605100 preceding and 604500 preceding),
     w_roll_6h  as (partition by lat_and_long_encoding_id order by time_of_measurement range between 21900 preceding and current row),
     w_roll_24h as (partition by lat_and_long_encoding_id order by time_of_measurement range between 86700 preceding and current row),
     w_roll_72h as (partition by lat_and_long_encoding_id order by time_of_measurement range between 259500 preceding and current row)

@@ -31,12 +31,12 @@ models:
   - name: stg_weather_raw__air_pollution
     description: Staging model joining raw air pollution measurements to the city coordinates snapshot.
     columns:
-      - name: longitude_coordinate
+      - name: city_coordinates.longitude_coordinate
         description: Longitude coordinate of the measurement location.
         data_tests:
           - not_null
 
-      - name: latitude_coordinate
+      - name: city_coordinates.latitude_coordinate
         description: Latitude coordinate of the measurement location.
         data_tests:
           - not_null
