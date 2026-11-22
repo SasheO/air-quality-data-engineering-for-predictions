@@ -68,27 +68,50 @@ echo -e "AIRFLOW_UID=$(id -u)"
 
 ### Directory structure
 
-TODO: update directory structure
-
 ```
-├── .dockerignore
 ├── .env_example
+├── .gitignore
 ├── compose.yaml
 ├── Dockerfile
 ├── README.md
 ├── requirements.txt
-├── air_quality_dbt_project/
-│   ├── dbt_project.yml
-│   └── models/             # staging and feature models with .yml files for docs, sources and tests
-│   │   ├── marts/
-│   │   └── staging/
+├── config/
 ├── dags/
-│   └── air_quality_dag.py
-├── images/                 # architecture diagram, leakage before/after charts, DAG screenshots
+│   ├── air_quality_helpers.py
+│   ├── air_quality_historical.py
+│   ├── air_quality_live.py
+│   └── air_quality_train.py
 ├── include/
-│   └── sql/                # ClickHouse DDL for raw, offline, online and audit tables
-└── plugins/
-    └── helpers.py          # helper functions used in DAGs
+│   ├── csv/
+│   │   └── latitudes_and_longitudes.csv
+│   ├── dbt/
+│   │   └── air_quality_feature_engineering/
+│   │       ├── dbt_project.yml
+│   │       ├── packages.yml
+│   │       ├── analyses/
+│   │       ├── macros/
+│   │       ├── models/
+│   │       │   └── weather_features/
+│   │       │       ├── feature_air_pollution.sql
+│   │       │       ├── feature_air_pollution_pit_correctness_test.sql
+│   │       │       ├── stg_weather_raw__air_pollution.sql
+│   │       │       ├── stg_weather_raw__city_coordinates.sql
+│   │       │       ├── _src_weather_raw.yml
+│   │       │       └── _weather_features_models.yml
+│   │       ├── seeds/
+│   │       ├── snapshots/
+│   │       │   ├── city_coordinates.sql
+│   │       │   └── _snapshots.yml
+│   │       └── tests/
+│   ├── notebooks/
+│   │   └── point_in_time_correctness_test.ipynb
+│   └── sql/
+│       ├── create_database.sql
+│       ├── create_raw_data_table.sql
+│       ├── create_training_model_table.sql
+│       ├── get_deduplicated_city_coordinates.sql
+│       ├── update_target_aqi_live.sql
+│       └── write_air_pollution_data.sql
 ```
 
 ### Set Up Connections and Variables in Airflow
@@ -191,14 +214,12 @@ A key deliverable of this project is a documented leakage exercise. The feature 
 
 The corrected implementation uses **trailing windows** only — a rolling mean over `[t-N, t]` — so each feature row uses only information that would have been available at time `t`.
 
-A before/after comparison of evaluation metrics for both implementations is included in the `images/` folder and summarised here:
+A before/after comparison of evaluation metrics for both implementations is included in the [point_in_time_correctness_test notebook](include/notebooks/point_in_time_correctness_test.ipynb) and summarised here:
 
 | Metric | Centered-window (leaky) | Trailing-window (corrected) |
 |---|---|---|
-| Accuracy | *(fill in)* | *(fill in)* |
-| Final train error | *(fill in)* | *(fill in)* |
-
-TODO: show image proof of training in jupyter notebook
+| Accuracy | 82.0% | 78.3% |
+| Final train error | 0.255 | 0.512 |
 
 ## Tests and Validation
 
