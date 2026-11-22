@@ -1,0 +1,506 @@
+version: 2
+
+
+models:
+
+  - name: stg_weather_raw__city_coordinates
+    description: Staging model for raw city coordinates with a surrogate location key.
+    columns:
+      - name: lat_and_long_encoding_id
+        description: Surrogate key generated from latitude_coordinate and longitude_coordinate.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: latitude_coordinate
+        description: Latitude coordinate of the city.
+        data_tests:
+          - not_null
+
+      - name: longitude_coordinate
+        description: Longitude coordinate of the city.
+        data_tests:
+          - not_null
+
+      - name: city
+        description: Name of the city.
+
+      - name: country
+        description: Country of the city.
+
+  - name: stg_weather_raw__air_pollution
+    description: Staging model joining raw air pollution measurements to the city coordinates snapshot.
+    columns:
+      - name: longitude_coordinate
+        description: Longitude coordinate of the measurement location.
+        data_tests:
+          - not_null
+
+      - name: latitude_coordinate
+        description: Latitude coordinate of the measurement location.
+        data_tests:
+          - not_null
+
+      - name: lat_and_long_encoding_id
+        description: Identifier for the city/measurement location.
+        data_tests:
+          - not_null
+
+      - name: co_concentration
+        description: Carbon monoxide (CO) concentration.
+
+      - name: no_concentration
+        description: Nitric oxide (NO) concentration.
+
+      - name: no2_concentration
+        description: Nitrogen dioxide (NO2) concentration.
+
+      - name: o3_concentration
+        description: Ozone (O3) concentration.
+
+      - name: so2_concentration
+        description: Sulfur dioxide (SO2) concentration.
+
+      - name: pm2_5_concentration
+        description: Fine particulate matter (PM2.5) concentration.
+
+      - name: pm10_concentration
+        description: Coarse particulate matter (PM10) concentration.
+
+      - name: nh3_concentration
+        description: Ammonia (NH3) concentration.
+
+      - name: aqi
+        description: Air Quality Index for the measurement.
+
+      - name: time_of_measurement
+        description: Local timestamp of the air pollution measurement.
+        data_tests:
+          - not_null
+
+      - name: time_of_measurement_utc
+        description: UTC-normalized timestamp of the measurement.
+        data_tests:
+          - not_null
+
+      - name: city_coordinates_scd_id
+        description: SCD surrogate key from the city_coordinates snapshot identifying the location version.
+
+
+  - name: feature_air_pollution
+    description: >
+      Feature table for OpenWeatherMap Air Pollution data. All lag, delta,
+      rolling, and forward-looking target windows carry a ±5-minute grace
+      period to tolerate the jitter of the hourly live ingestion pipeline
+      (timestamps can land a few seconds to minutes off the exact hour).
+    columns:
+      - name: air_pollution_features_row_id
+        description: Surrogate primary key generated from time_of_measurement and city_coordinates_scd_id.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: time_of_measurement
+        description: Local timestamp of the air pollution measurement.
+        data_tests:
+          - not_null
+
+      - name: time_of_measurement_utc
+        description: UTC-normalized timestamp of the measurement.
+        data_tests:
+          - not_null
+
+      - name: lat_and_long_encoding_id
+        description: Identifier for the city/measurement location.
+        data_tests:
+          - not_null
+
+      - name: co_concentration
+        description: Carbon monoxide (CO) concentration.
+
+      - name: no_concentration
+        description: Nitric oxide (NO) concentration.
+
+      - name: no2_concentration
+        description: Nitrogen dioxide (NO2) concentration.
+
+      - name: o3_concentration
+        description: Ozone (O3) concentration.
+
+      - name: so2_concentration
+        description: Sulfur dioxide (SO2) concentration.
+
+      - name: pm2_5_concentration
+        description: Fine particulate matter (PM2.5) concentration.
+
+      - name: pm10_concentration
+        description: Coarse particulate matter (PM10) concentration.
+
+      - name: nh3_concentration
+        description: Ammonia (NH3) concentration.
+
+      - name: aqi
+        description: Air Quality Index for the measurement.
+
+      - name: aqi_1_hour_past
+        description: AQI value 1 hour before the current row, within a ±5-minute grace period.
+
+      - name: aqi_3_hour_past
+        description: AQI value 3 hours before the current row, within a ±5-minute grace period.
+
+      - name: aqi_24_hour_past
+        description: AQI value 24 hours before the current row, within a ±5-minute grace period.
+
+      - name: aqi_168_hour_past
+        description: AQI value 168 hours (7 days) before the current row, within a ±5-minute grace period.
+
+      - name: aqi_6_hour_rolling_mean
+        description: Mean AQI over the trailing 6 hours, with a 5-minute grace period on the lower bound.
+
+      - name: aqi_6_hour_rolling_stddev
+        description: Sample standard deviation of AQI over the trailing 6 hours, with a 5-minute grace period on the lower bound.
+
+      - name: aqi_6_hour_rolling_max
+        description: Maximum AQI over the trailing 6 hours, with a 5-minute grace period on the lower bound.
+
+      - name: aqi_24_hour_rolling_mean
+        description: Mean AQI over the trailing 24 hours, with a 5-minute grace period on the lower bound.
+
+      - name: aqi_24_hour_rolling_stddev
+        description: Sample standard deviation of AQI over the trailing 24 hours, with a 5-minute grace period on the lower bound.
+
+      - name: aqi_24_hour_rolling_max
+        description: Maximum AQI over the trailing 24 hours, with a 5-minute grace period on the lower bound.
+
+      - name: aqi_72_hour_rolling_mean
+        description: Mean AQI over the trailing 72 hours, with a 5-minute grace period on the lower bound.
+
+      - name: aqi_72_hour_rolling_stddev
+        description: Sample standard deviation of AQI over the trailing 72 hours, with a 5-minute grace period on the lower bound.
+
+      - name: aqi_72_hour_rolling_max
+        description: Maximum AQI over the trailing 72 hours, with a 5-minute grace period on the lower bound.
+
+      - name: aqi_1_hour_delta
+        description: Change in AQI versus 1 hour ago, within a ±5-minute grace period.
+
+      - name: aqi_3_hour_delta
+        description: Change in AQI versus 3 hours ago, within a ±5-minute grace period.
+
+      - name: pm2_5_1_hour_past
+        description: PM2.5 concentration 1 hour before the current row, within a ±5-minute grace period.
+
+      - name: pm2_5_3_hour_past
+        description: PM2.5 concentration 3 hours before the current row, within a ±5-minute grace period.
+
+      - name: pm2_5_24_hour_past
+        description: PM2.5 concentration 24 hours before the current row, within a ±5-minute grace period.
+
+      - name: pm2_5_168_hour_past
+        description: PM2.5 concentration 168 hours (7 days) before the current row, within a ±5-minute grace period.
+
+      - name: pm2_5_6_hour_rolling_mean
+        description: Mean PM2.5 concentration over the trailing 6 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm2_5_6_hour_rolling_stddev
+        description: Sample standard deviation of PM2.5 over the trailing 6 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm2_5_6_hour_rolling_max
+        description: Maximum PM2.5 concentration over the trailing 6 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm2_5_24_hour_rolling_mean
+        description: Mean PM2.5 concentration over the trailing 24 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm2_5_24_hour_rolling_stddev
+        description: Sample standard deviation of PM2.5 over the trailing 24 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm2_5_24_hour_rolling_max
+        description: Maximum PM2.5 concentration over the trailing 24 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm2_5_72_hour_rolling_mean
+        description: Mean PM2.5 concentration over the trailing 72 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm2_5_72_hour_rolling_stddev
+        description: Sample standard deviation of PM2.5 over the trailing 72 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm2_5_72_hour_rolling_max
+        description: Maximum PM2.5 concentration over the trailing 72 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm2_5_1_hour_delta
+        description: Change in PM2.5 versus 1 hour ago, within a ±5-minute grace period.
+
+      - name: pm2_5_3_hour_delta
+        description: Change in PM2.5 versus 3 hours ago, within a ±5-minute grace period.
+
+      - name: pm10_1_hour_past
+        description: PM10 concentration 1 hour before the current row, within a ±5-minute grace period.
+
+      - name: pm10_3_hour_past
+        description: PM10 concentration 3 hours before the current row, within a ±5-minute grace period.
+
+      - name: pm10_24_hour_past
+        description: PM10 concentration 24 hours before the current row, within a ±5-minute grace period.
+
+      - name: pm10_168_hour_past
+        description: PM10 concentration 168 hours (7 days) before the current row, within a ±5-minute grace period.
+
+      - name: pm10_6_hour_rolling_mean
+        description: Mean PM10 concentration over the trailing 6 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm10_6_hour_rolling_stddev
+        description: Sample standard deviation of PM10 over the trailing 6 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm10_6_hour_rolling_max
+        description: Maximum PM10 concentration over the trailing 6 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm10_24_hour_rolling_mean
+        description: Mean PM10 concentration over the trailing 24 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm10_24_hour_rolling_stddev
+        description: Sample standard deviation of PM10 over the trailing 24 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm10_24_hour_rolling_max
+        description: Maximum PM10 concentration over the trailing 24 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm10_72_hour_rolling_mean
+        description: Mean PM10 concentration over the trailing 72 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm10_72_hour_rolling_stddev
+        description: Sample standard deviation of PM10 over the trailing 72 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm10_72_hour_rolling_max
+        description: Maximum PM10 concentration over the trailing 72 hours, with a 5-minute grace period on the lower bound.
+
+      - name: pm10_1_hour_delta
+        description: Change in PM10 versus 1 hour ago, within a ±5-minute grace period.
+
+      - name: pm10_3_hour_delta
+        description: Change in PM10 versus 3 hours ago, within a ±5-minute grace period.
+
+      - name: hour_of_day
+        description: Hour of day extracted from time_of_measurement (0–23).
+
+      - name: day_of_week
+        description: ISO day of week extracted from time_of_measurement (1 = Monday … 7 = Sunday).
+
+      - name: is_weekend
+        description: Boolean flag; TRUE when day_of_week is Saturday or Sunday.
+
+      - name: month_of_the_year
+        description: Month extracted from time_of_measurement (1–12).
+
+      - name: season
+        description: Seasonal category derived from the city's latitude and the month.
+
+      - name: aqi_6_hour_ahead
+        description: Target variable; AQI 6 hours ahead, gap-aware within the location partition, within a ±5-minute grace period.
+
+  - name: feature_air_pollution_pit_correctness_test
+    description: >
+      Academic exercise variant of `feature_air_pollution` used to locally
+      test point-in-time correctness. Rolling windows are centered (trailing
+      half + leading half) rather than strictly trailing, so this model
+      intentionally introduces look-ahead and should not be used in production.
+      All lag, delta, rolling, and forward-looking target windows carry a
+      ±5-minute grace period to tolerate live ingestion jitter.
+    columns:
+      - name: air_pollution_features_row_id
+        description: Surrogate primary key generated from time_of_measurement and city_coordinates_scd_id.
+        data_tests:
+          - unique
+          - not_null
+
+      - name: time_of_measurement
+        description: Local timestamp of the air pollution measurement.
+        data_tests:
+          - not_null
+
+      - name: time_of_measurement_utc
+        description: UTC-normalized timestamp of the measurement.
+        data_tests:
+          - not_null
+
+      - name: lat_and_long_encoding_id
+        description: Identifier for the city/measurement location.
+        data_tests:
+          - not_null
+
+      - name: co_concentration
+        description: Carbon monoxide (CO) concentration.
+
+      - name: no_concentration
+        description: Nitric oxide (NO) concentration.
+
+      - name: no2_concentration
+        description: Nitrogen dioxide (NO2) concentration.
+
+      - name: o3_concentration
+        description: Ozone (O3) concentration.
+
+      - name: so2_concentration
+        description: Sulfur dioxide (SO2) concentration.
+
+      - name: pm2_5_concentration
+        description: Fine particulate matter (PM2.5) concentration.
+
+      - name: pm10_concentration
+        description: Coarse particulate matter (PM10) concentration.
+
+      - name: nh3_concentration
+        description: Ammonia (NH3) concentration.
+
+      - name: aqi
+        description: Air Quality Index for the measurement.
+
+      - name: aqi_1_hour_past
+        description: AQI value 1 hour before the current row, within a ±5-minute grace period.
+
+      - name: aqi_3_hour_past
+        description: AQI value 3 hours before the current row, within a ±5-minute grace period.
+
+      - name: aqi_24_hour_past
+        description: AQI value 24 hours before the current row, within a ±5-minute grace period.
+
+      - name: aqi_168_hour_past
+        description: AQI value 168 hours (7 days) before the current row, within a ±5-minute grace period.
+
+      - name: aqi_6_hour_rolling_mean
+        description: Mean AQI over a centered 6-hour window (±3 hours), with a 5-minute grace period on each bound.
+
+      - name: aqi_6_hour_rolling_stddev
+        description: Sample standard deviation of AQI over a centered 6-hour window (±3 hours), with a 5-minute grace period on each bound.
+
+      - name: aqi_6_hour_rolling_max
+        description: Maximum AQI over a centered 6-hour window (±3 hours), with a 5-minute grace period on each bound.
+
+      - name: aqi_24_hour_rolling_mean
+        description: Mean AQI over a centered 24-hour window (±12 hours), with a 5-minute grace period on each bound.
+
+      - name: aqi_24_hour_rolling_stddev
+        description: Sample standard deviation of AQI over a centered 24-hour window (±12 hours), with a 5-minute grace period on each bound.
+
+      - name: aqi_24_hour_rolling_max
+        description: Maximum AQI over a centered 24-hour window (±12 hours), with a 5-minute grace period on each bound.
+
+      - name: aqi_72_hour_rolling_mean
+        description: Mean AQI over a centered 72-hour window (±36 hours), with a 5-minute grace period on each bound.
+
+      - name: aqi_72_hour_rolling_stddev
+        description: Sample standard deviation of AQI over a centered 72-hour window (±36 hours), with a 5-minute grace period on each bound.
+
+      - name: aqi_72_hour_rolling_max
+        description: Maximum AQI over a centered 72-hour window (±36 hours), with a 5-minute grace period on each bound.
+
+      - name: aqi_1_hour_delta
+        description: Change in AQI versus 1 hour ago, within a ±5-minute grace period.
+
+      - name: aqi_3_hour_delta
+        description: Change in AQI versus 3 hours ago, within a ±5-minute grace period.
+
+      - name: pm2_5_1_hour_past
+        description: PM2.5 concentration 1 hour before the current row, within a ±5-minute grace period.
+
+      - name: pm2_5_3_hour_past
+        description: PM2.5 concentration 3 hours before the current row, within a ±5-minute grace period.
+
+      - name: pm2_5_24_hour_past
+        description: PM2.5 concentration 24 hours before the current row, within a ±5-minute grace period.
+
+      - name: pm2_5_168_hour_past
+        description: PM2.5 concentration 168 hours (7 days) before the current row, within a ±5-minute grace period.
+
+      - name: pm2_5_6_hour_rolling_mean
+        description: Mean PM2.5 concentration over a centered 6-hour window (±3 hours), with a 5-minute grace period on each bound.
+
+      - name: pm2_5_6_hour_rolling_stddev
+        description: Sample standard deviation of PM2.5 over a centered 6-hour window (±3 hours), with a 5-minute grace period on each bound.
+
+      - name: pm2_5_6_hour_rolling_max
+        description: Maximum PM2.5 concentration over a centered 6-hour window (±3 hours), with a 5-minute grace period on each bound.
+
+      - name: pm2_5_24_hour_rolling_mean
+        description: Mean PM2.5 concentration over a centered 24-hour window (±12 hours), with a 5-minute grace period on each bound.
+
+      - name: pm2_5_24_hour_rolling_stddev
+        description: Sample standard deviation of PM2.5 over a centered 24-hour window (±12 hours), with a 5-minute grace period on each bound.
+
+      - name: pm2_5_24_hour_rolling_max
+        description: Maximum PM2.5 concentration over a centered 24-hour window (±12 hours), with a 5-minute grace period on each bound.
+
+      - name: pm2_5_72_hour_rolling_mean
+        description: Mean PM2.5 concentration over a centered 72-hour window (±36 hours), with a 5-minute grace period on each bound.
+
+      - name: pm2_5_72_hour_rolling_stddev
+        description: Sample standard deviation of PM2.5 over a centered 72-hour window (±36 hours), with a 5-minute grace period on each bound.
+
+      - name: pm2_5_72_hour_rolling_max
+        description: Maximum PM2.5 concentration over a centered 72-hour window (±36 hours), with a 5-minute grace period on each bound.
+
+      - name: pm2_5_1_hour_delta
+        description: Change in PM2.5 versus 1 hour ago, within a ±5-minute grace period.
+
+      - name: pm2_5_3_hour_delta
+        description: Change in PM2.5 versus 3 hours ago, within a ±5-minute grace period.
+
+      - name: pm10_1_hour_past
+        description: PM10 concentration 1 hour before the current row, within a ±5-minute grace period.
+
+      - name: pm10_3_hour_past
+        description: PM10 concentration 3 hours before the current row, within a ±5-minute grace period.
+
+      - name: pm10_24_hour_past
+        description: PM10 concentration 24 hours before the current row, within a ±5-minute grace period.
+
+      - name: pm10_168_hour_past
+        description: PM10 concentration 168 hours (7 days) before the current row, within a ±5-minute grace period.
+
+      - name: pm10_6_hour_rolling_mean
+        description: Mean PM10 concentration over a centered 6-hour window (±3 hours), with a 5-minute grace period on each bound.
+
+      - name: pm10_6_hour_rolling_stddev
+        description: Sample standard deviation of PM10 over a centered 6-hour window (±3 hours), with a 5-minute grace period on each bound.
+
+      - name: pm10_6_hour_rolling_max
+        description: Maximum PM10 concentration over a centered 6-hour window (±3 hours), with a 5-minute grace period on each bound.
+
+      - name: pm10_24_hour_rolling_mean
+        description: Mean PM10 concentration over a centered 24-hour window (±12 hours), with a 5-minute grace period on each bound.
+
+      - name: pm10_24_hour_rolling_stddev
+        description: Sample standard deviation of PM10 over a centered 24-hour window (±12 hours), with a 5-minute grace period on each bound.
+
+      - name: pm10_24_hour_rolling_max
+        description: Maximum PM10 concentration over a centered 24-hour window (±12 hours), with a 5-minute grace period on each bound.
+
+      - name: pm10_72_hour_rolling_mean
+        description: Mean PM10 concentration over a centered 72-hour window (±36 hours), with a 5-minute grace period on each bound.
+
+      - name: pm10_72_hour_rolling_stddev
+        description: Sample standard deviation of PM10 over a centered 72-hour window (±36 hours), with a 5-minute grace period on each bound.
+
+      - name: pm10_72_hour_rolling_max
+        description: Maximum PM10 concentration over a centered 72-hour window (±36 hours), with a 5-minute grace period on each bound.
+
+      - name: pm10_1_hour_delta
+        description: Change in PM10 versus 1 hour ago, within a ±5-minute grace period.
+
+      - name: pm10_3_hour_delta
+        description: Change in PM10 versus 3 hours ago, within a ±5-minute grace period.
+
+      - name: hour_of_day
+        description: Hour of day extracted from time_of_measurement (0–23).
+
+      - name: day_of_week
+        description: ISO day of week extracted from time_of_measurement (1 = Monday … 7 = Sunday).
+
+      - name: is_weekend
+        description: Boolean flag; TRUE when day_of_week is Saturday or Sunday.
+
+      - name: month_of_the_year
+        description: Month extracted from time_of_measurement (1–12).
+
+      - name: season
+        description: Seasonal category derived from the city's latitude and the month.
+
+      - name: aqi_6_hour_ahead
+        description: Target variable; AQI 6 hours ahead, gap-aware within the location partition, within a ±5-minute grace period.
