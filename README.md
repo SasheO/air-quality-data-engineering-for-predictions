@@ -82,7 +82,7 @@ Air quality forecasting supports genuine use cases such as public health advisor
 
 ## Pipeline Architecture
 
-> TODO: Add an architecture diagram to `images/` and embed it here.
+![Pipeline architecture diagram](images/air-quality.drawio.png)
 
 The pipeline flows as follows:
 
@@ -162,7 +162,7 @@ The historical data pipeline, `air_quality_historical`, fetches data month by mo
 
 From the Airflow webserver, type locate `air_quality_historical` DAG and Toggle the button at the top-left of the screen to unpause the DAG. Allow it to populate all historical data as this will be used for model training. The DAG will run and populate the raw table, the offline feature table, and the city tables.
 
-TODO: insert image of historical runs
+![Historical Runs diagram](images/historical-run.png)
 
 To train the model, toggle on the `air_quality_historical` DAG. Details on the model, its accuracy, and more are available in the `monitoring.ml_model_stats` table and will also show in the logs of the Dag Run.
 
