@@ -17,54 +17,10 @@ The value delivered:
 
 - A repeatable hourly pipeline from raw API ingestion to served predictions
 - A documented, tested feature layer shared by training and serving
-- Automated data quality checks with results recorded in an audit table
+- Automated data quality checks
+- ML model stats table for monitoring model performance and feature drift
 - A worked leakage exercise showing the inflated metrics of a leaky implementation versus the corrected one
 
-### Relevance
-
-Air quality forecasting supports genuine use cases such as public health advisories and event planning, but the value of this project lies primarily in the pattern it exercises: raw ingestion, time-aware feature engineering, offline/online consistency, and served predictions. This pattern is directly transferable to feature pipelines built for credit risk, fraud, or other predictive models in a financial services setting, where the same consistency requirements apply.
-
-### Dataset
-
-**Source:** OpenWeatherMap Air Pollution API (free tier), historical and current endpoints, providing hourly AQI and pollutant component data (CO, NO2, O3, SO2, PM2.5, PM10, NH3) per city.
-
-**Coverage:** 5 to 10 cities, across parts of Africa and the Carribean
-
-## Pipeline Architecture
-
-> TODO: Add an architecture diagram to `images/` and embed it here.
-
-The pipeline flows as follows:
-
-1. **Extract** — Airflow fetches hourly air pollution data per city from the OpenWeatherMap API.
-2. **Stage** — Parsed rows are written to a staging table in MinIO/ClickHouse staging.
-3. **Load raw** — Rows are bulk-inserted into the append-only raw ClickHouse table.
-4. **Transform** — dbt models compute the shared feature logic, materialising the offline feature table and the latest-row online table from the same code.
-5. **Validate** — dbt tests and a data quality audit task run after each pipeline run, writing results to an audit table.
-
-## Setup Instructions
-
-Clone this repo onto your device by running this command in your terminal:
-
-```bash
-git clone https://github.com/SasheO/air-quality-data-engineering-for-predictions.git
-```
-
-Copy `.env_example` into a file named `.env` and fill in your environment variables. 
-
-- Set `MINIO_ROOT_USER` to `admin` and pick your preferred MinIO password.
-- Set `CLICKHOUSE_USER` to `default` and pick your preferred ClickHouse password.
-- Put your OpenWeatherMap API key in `OPENWEATHER_API_SECRET_KEY`.
-
-To configure user permissions:
-
-- If you're using **Linux**, set a user ID to prevent permission issues when Docker writes files locally. Run this in your terminal and copy the value into `AIRFLOW_UID` in your `.env` file:
-
-```bash
-echo -e "AIRFLOW_UID=$(id -u)"
-```
-
-- If you're using **macOS or Windows**, leave the value in your `.env` file as is: `AIRFLOW_UID=50000`
 
 ### Directory structure
 
@@ -114,11 +70,57 @@ echo -e "AIRFLOW_UID=$(id -u)"
 │       └── write_air_pollution_data.sql
 ```
 
+### Relevance
+
+Air quality forecasting supports genuine use cases such as public health advisories and event planning, but the value of this project lies primarily in the pattern it exercises: raw ingestion, time-aware feature engineering, offline/online consistency, and served predictions. This pattern is directly transferable to feature pipelines built for credit risk, fraud, or other predictive models in a financial services setting, where the same consistency requirements apply.
+
+### Dataset
+
+**Source:** OpenWeatherMap Air Pollution API (free tier), historical and current endpoints, providing hourly AQI and pollutant component data (CO, NO2, O3, SO2, PM2.5, PM10, NH3) per city.
+
+**Coverage:** 5 to 10 cities, across parts of Africa and the Carribean
+
+## Pipeline Architecture
+
+> TODO: Add an architecture diagram to `images/` and embed it here.
+
+The pipeline flows as follows:
+
+1. **Extract** — Airflow fetches hourly air pollution data per city from the OpenWeatherMap API.
+2. **Stage** — Parsed rows are written to a staging table in MinIO/ClickHouse staging.
+3. **Load raw** — Rows are bulk-inserted into the append-only raw ClickHouse table.
+4. **Transform** — dbt models compute the shared feature logic, materialising the offline feature table and the latest-row online table from the same code.
+5. **Validate** — dbt tests
+
+## Setup Instructions
+
+Clone this repo onto your device by running this command in your terminal:
+
+```bash
+git clone https://github.com/SasheO/air-quality-data-engineering-for-predictions.git
+```
+
+Copy `.env_example` into a file named `.env` and fill in your environment variables. 
+
+- Set `MINIO_ROOT_USER` to `admin` and pick your preferred MinIO password.
+- Set `CLICKHOUSE_USER` to `default` and pick your preferred ClickHouse password.
+- Put your OpenWeatherMap API key in `OPENWEATHER_API_SECRET_KEY`.
+
+To configure user permissions:
+
+- If you're using **Linux**, set a user ID to prevent permission issues when Docker writes files locally. Run this in your terminal and copy the value into `AIRFLOW_UID` in your `.env` file:
+
+```bash
+echo -e "AIRFLOW_UID=$(id -u)"
+```
+
+- If you're using **macOS or Windows**, leave the value in your `.env` file as is: `AIRFLOW_UID=50000`
+
 ### Set Up Connections and Variables in Airflow
 
 In your terminal, navigate to the folder where this repository is stored and run `docker compose up`.
 
-Open the Airflow webserver in a browser at http://localhost:8080/.
+Open the Airflow webserver in a browser at http://localhost:9080/.
 
 Go to **admin > connections** and click the **+** sign to create a new connection. The connections to add are:
 
