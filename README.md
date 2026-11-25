@@ -171,17 +171,31 @@ To turn on the live hourly predictions and update pipeline, fill in 'MODEL_KEY' 
 To query ClickHouse tables, open the ClickHouse Web UI at http://localhost:8143/. Enter your default username and password in the credentials dialog at the top left. Run your queries in the query box. Some sample queries:
 
 ```sql
--- Sample query: "What is the most recent AQI for each city?"
+-- Sample query: "What is the predicted recent AQI for each city from most recent measurements?"
 SELECT
     city,
     country,
     local_time_of_measurement,
-    current_aqi
+    prediction
 FROM weather_features.online_air_pollution_predictions
-ORDER BY city, local_time_of_measurement DESC;
+order BY city DESC, local_time_of_measurement DESC
+limit 1 BY city, local_time_of_measurement
+where prediction is not null
+;
 
--- TODO: add query to get predictions from online table as well
--- TODO: add query to get ML model stats
+-- Sample query: "What is the most recent AQI for each city?"
+select 
+    model_name,
+    model_type,
+    model_class,
+    key,
+    loss_value,
+    loss_function,
+    entry_timestamp,
+    details_json
+    from monitoring.ml_model_stats 
+where model_type = 'lightgbm.LGBMClassifier'
+and first_entry = true
 ```
 
 The DAG will also generate dbt docs with descriptions of tables, columns, relationships, dependencies, and data tests, viewable within the Airflow webserver via **browse > dbt Docs**.
@@ -235,4 +249,6 @@ TODO: include screenshot
 
 ## Known Limitations and Ideas for Extending the Project
 
-TODO: 
+The MLOps side of this project is intentionally rudimentary and leaves substantial room for improvement. At present, model artifacts are serialized with Python's `pickle` and stored in MinIO behind HMAC-signed URLs, and a single monitoring table captures basic model statistics. That is the extent of the operational tooling.
+
+There is no experiment tracking, model registry, automated retraining trigger, drift detection, or alerting. Pickle also carries well-known security and portability drawbacks, and a lone monitoring table offers visibility but no automated response. This project could benefit from more robust MLOps practices.
