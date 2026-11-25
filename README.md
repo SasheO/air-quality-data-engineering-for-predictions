@@ -173,6 +173,7 @@ To query ClickHouse tables, open the ClickHouse Web UI at http://localhost:8143/
 ```sql
 -- Sample query: "What is the predicted recent AQI for each city from most recent measurements?"
 SELECT
+    lat_and_long_encoding_id, -- the primary identifier of a location in most tables as city and country names can change, even if they rarely do
     city,
     country,
     local_time_of_measurement,
