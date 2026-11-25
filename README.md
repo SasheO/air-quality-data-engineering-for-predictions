@@ -180,6 +180,8 @@ SELECT
 FROM weather_features.online_air_pollution_predictions
 ORDER BY city, local_time_of_measurement DESC;
 
+-- TODO: add query to get predictions from online table as well
+-- TODO: add query to get ML model stats
 ```
 
 The DAG will also generate dbt docs with descriptions of tables, columns, relationships, dependencies, and data tests, viewable within the Airflow webserver via **browse > dbt Docs**.
